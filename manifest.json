@@ -1,0 +1,15 @@
+{
+  "system_name": "Semantic Guardtrails",
+  "version": "0.1.0",
+  "description": "Simplified latent space visualization system focusing on vector arithmetic and semantic safety.",
+  "active_features": [
+    "neural_core_bge_m3",
+    "binary_streaming",
+    "integrity_shielding"
+  ],
+  "engine_parameters": {
+    "dimensions": 1024,
+    "vector_database": "LanceDB",
+    "relational_database": "SQLite"
+  }
+}

@@ -1,0 +1,4 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/sg_env/bin/python",
+    "python.analysis.extraPaths": ["${workspaceFolder}/backend"]
+}
