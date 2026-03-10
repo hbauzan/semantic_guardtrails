@@ -1,10 +1,6 @@
 #!/bin/bash
-
-# Ensure we're in the repository root
-cd "$(dirname "$0")"
-
-echo "=> Activating virtual environment..."
-source sg_env/bin/activate
-
-export PYTHONPATH="$(pwd)/backend"
-python backend/scripts/commander.py "$@"
+set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$PROJECT_ROOT/sg_env/bin/activate"
+export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+python3 backend/scripts/commander.py
