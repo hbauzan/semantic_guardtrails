@@ -1,13 +1,20 @@
 {
     "project": "Semantic Guardrails",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "active_features": {
         "neural_core_bge_m3": true,
         "vector_arithmetic": true,
-        "minimalist_hud": true
+        "minimalist_hud": true,
+        "context_packager": true,
+        "flight_mechanics_awsd": true,
+        "exponential_thrust_shift": true,
+        "pointer_lock_controls": true
     },
     "constraints": {
-        "manifold_bounds": [0, 300],
+        "manifold_bounds": [
+            0,
+            300
+        ],
         "vector_dim": 1024
     }
 }
