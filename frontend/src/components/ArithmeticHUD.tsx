@@ -189,7 +189,8 @@ const TargetingHUD: React.FC = () => {
   );
 };
 
-const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number }> = ({ nodes, xStretch }) => {
+// XZ Plane Raycaster Probe
+const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor: number }> = ({ nodes, xStretch, uiScaleFactor }) => {
   const { camera } = useThree();
   const setHoveredDimensionIndex = useSemanticStore(state => state.setHoveredDimensionIndex);
   const setSelectedValues = useSemanticStore(state => state.setSelectedValues);
@@ -203,29 +204,57 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number }> = ({ nodes,
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
-    const targetZ = -10;
-    if (Math.abs(raycaster.ray.direction.z) > 0.0001) {
-      const t = (targetZ - raycaster.ray.origin.z) / raycaster.ray.direction.z;
+    // Raycast towards Y=0 plane (the Semantic Disk floor)
+    if (Math.abs(raycaster.ray.direction.y) > 0.0001) {
+      const t = (0 - raycaster.ray.origin.y) / raycaster.ray.direction.y;
       if (t > 0) {
         const hitPoint = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(t));
-        let targetedIndex = Math.round((hitPoint.x / xStretch) + 512);
 
-        const yTop = 5;
-        const yBottom = 5 - (3 * 2.5);
+        let closestNodeIdx = -1;
+        let minZDist = Infinity;
+        let closestPosX = 0;
 
-        if (targetedIndex >= 0 && targetedIndex < 1024 && hitPoint.y <= yTop + 2 && hitPoint.y >= yBottom - 2) {
-          setHoveredDimensionIndex(targetedIndex);
-          const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
-          setSelectedValues(values);
-        } else {
-          setHoveredDimensionIndex(null);
+        for (let i = 0; i < nodes.length; i++) {
+          const n = nodes[i];
+          let posZ = 0;
+          let posX = 0;
+
+          if (i > 0 && n.vector && n.vector.length >= 3 && nodes[0]?.vector) {
+            const vA = nodes[0].vector;
+            const magA = Math.sqrt(vA.reduce((sum, val) => sum + val * val, 0));
+            const magN = Math.sqrt(n.vector.reduce((sum, val) => sum + val * val, 0));
+            let dn = 1;
+            if (magA > 0 && magN > 0) {
+              const dot = vA.reduce((sum, val, idx) => sum + val * (n.vector![idx] || 0), 0);
+              dn = 1 - (dot / (magA * magN));
+            }
+            const angle = Math.atan2(n.vector[2], n.vector[0]);
+            posX = Math.cos(angle) * dn * uiScaleFactor * 50.0;
+            posZ = Math.sin(angle) * dn * uiScaleFactor * 50.0;
+          }
+
+          const distZ = Math.abs(hitPoint.z - posZ);
+          if (distZ < minZDist) {
+            minZDist = distZ;
+            closestNodeIdx = i;
+            closestPosX = posX;
+          }
         }
-      } else {
-        setHoveredDimensionIndex(null);
+
+        if (closestNodeIdx !== -1 && minZDist < 10.0) {
+          let targetedIndex = Math.round(((hitPoint.x - closestPosX) / xStretch) + 512);
+
+          if (targetedIndex >= 0 && targetedIndex < 1024) {
+            setHoveredDimensionIndex(targetedIndex);
+            const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
+            setSelectedValues(values);
+            return;
+          }
+        }
       }
-    } else {
-      setHoveredDimensionIndex(null);
     }
+
+    setHoveredDimensionIndex(null);
   });
 
   return null;
@@ -537,7 +566,7 @@ const ArithmeticHUD: React.FC = () => {
       {/* 3D Canvas */}
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
-        <ProbeSystem nodes={nodes} xStretch={xStretch} />
+        <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
 
@@ -555,17 +584,15 @@ const ArithmeticHUD: React.FC = () => {
               dn = 1 - (dot / (magA * magN));
             }
             if (node.vector.length >= 3) {
-              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
-              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
-              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
-              const normX = dir3D[0] / (dirMag3D || 1);
-              const normY = dir3D[1] / (dirMag3D || 1);
-              const normZ = dir3D[2] / (dirMag3D || 1);
+              // 2D Directional Mapping: XZ Layout (Semantic Disk)
+              const angle = Math.atan2(node.vector[2], node.vector[0]);
+              const normX = Math.cos(angle);
+              const normZ = Math.sin(angle);
 
               const BASE_SPREAD = 50.0;
               pos = [
                 normX * dn * uiScaleFactor * BASE_SPREAD,
-                normY * dn * uiScaleFactor * BASE_SPREAD,
+                0, // Strictly anchored to the floor
                 normZ * dn * uiScaleFactor * BASE_SPREAD
               ];
             }
@@ -576,7 +603,7 @@ const ArithmeticHUD: React.FC = () => {
                 <meshStandardMaterial color={node.color} emissive={node.color} emissiveIntensity={0.5} />
               </Sphere>
               <Text
-                position={[0, 0.6, 0]}
+                position={[0, 0, 0]}
                 fontSize={0.5}
                 color={node.color}
                 anchorX="center"
@@ -606,17 +633,15 @@ const ArithmeticHUD: React.FC = () => {
               dn = 1 - (dot / (magA * magN));
             }
             if (node.vector.length >= 3) {
-              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
-              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
-              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
-              const normX = dir3D[0] / (dirMag3D || 1);
-              const normY = dir3D[1] / (dirMag3D || 1);
-              const normZ = dir3D[2] / (dirMag3D || 1);
+              // 2D Directional Mapping: XZ Layout (Semantic Disk)
+              const angle = Math.atan2(node.vector[2], node.vector[0]);
+              const normX = Math.cos(angle);
+              const normZ = Math.sin(angle);
 
               const BASE_SPREAD = 50.0;
               pos = [
                 normX * dn * uiScaleFactor * BASE_SPREAD,
-                normY * dn * uiScaleFactor * BASE_SPREAD,
+                0, // Strictly anchored to the floor
                 normZ * dn * uiScaleFactor * BASE_SPREAD
               ];
             }

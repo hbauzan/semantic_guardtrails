@@ -20,13 +20,13 @@
 
 ### Visualizations
 *   **Semantic Ribbon Trace**: Real-time rendering of 1024D vector geometries strictly utilizing `THREE.InstancedMesh` with a predefined 1024 count for optimal performance, and connected points forming a continuous thread with `THREE.Line`.
-    *   **Spatial Positioning Algorithm (Radial Cosine Distance)**:
+    *   **Spatial Positioning Algorithm (Radial Cosine Distance on XZ Plane)**:
         *   **Cosine Distance ($D_n$)**: Calculated relative to the master token (Word A) which is rigidly fixed at the absolute origin `[0, 0, 0]`. If vector magnitude is 0, $D_n$ defaults to 1.
-        *   **Radial Mapping**: Thread starting position is defined radially as $\\vec{Pos}_n = \\text{Norm}_{3D}(V_n) \\cdot D_n \\cdot \\text{ui\\_scale\\_factor} \\cdot 50.0$. Identical tokens collapse to origin, anomalies are ejected outward with a 50x base spread scalar to ensure visible separation across thousands of units.
-        *   **Local Space Mapping (DNA Accordion)**:
+        *   **Radial Mapping (Semantic Disk)**: Thread anchor position is defined purely on the 2D XZ plane. The bearing is derived from dimensions `[0]` and `[2]`: `angle = Math.atan2(vector[2], vector[0])`. Position maps as `[Math.cos(angle) * Dn * ui_scale * 50, 0, Math.sin(angle) * Dn * ui_scale * 50]`.
+        *   **Local Space Mapping (Visual DNA)**:
             *   `X`: Linear stretch of the dimensions `(index - 512) * xStretch`. `xStretch` scales dynamically between `0.1` and `40.0`.
-            *   `Y`: Amplitude spikes evaluated natively and controlled by global dynamic scalar `vectorValue * amplitude` (up to `50.0`).
-            *   `Z`: Local Z is 0. Group encapsulation handles global offset.
+            *   `Y`: The $Y$-axis is entirely reserved for dimension magnitude, growing functionally upwards from the anchor floor: `vectorValue * amplitude`. Target amplitude spans to `50.0`.
+            *   `Z`: Local Z is 0. Group encapsulation handles global offset on the 2D plane.
     *   **Chromatic Mapping Algorithm**:
         *   `~1.0`: Bright White/Yellow/Green (Emissive).
         *   `~0.0`: Opacity 0.1 / Transparent (Fragment discard via shader).

@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-10 22:07:01.899336
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-10 22:30:32.156594
 
 
 ################################################################################
@@ -27,13 +27,13 @@ FILE: architecture_spec.md
 
 ### Visualizations
 *   **Semantic Ribbon Trace**: Real-time rendering of 1024D vector geometries strictly utilizing `THREE.InstancedMesh` with a predefined 1024 count for optimal performance, and connected points forming a continuous thread with `THREE.Line`.
-    *   **Spatial Positioning Algorithm (Radial Cosine Distance)**:
+    *   **Spatial Positioning Algorithm (Radial Cosine Distance on XZ Plane)**:
         *   **Cosine Distance ($D_n$)**: Calculated relative to the master token (Word A) which is rigidly fixed at the absolute origin `[0, 0, 0]`. If vector magnitude is 0, $D_n$ defaults to 1.
-        *   **Radial Mapping**: Thread starting position is defined radially as $\\vec{Pos}_n = \\text{Norm}_{3D}(V_n) \\cdot D_n \\cdot \\text{ui\\_scale\\_factor} \\cdot 50.0$. Identical tokens collapse to origin, anomalies are ejected outward with a 50x base spread scalar to ensure visible separation across thousands of units.
-        *   **Local Space Mapping (DNA Accordion)**:
+        *   **Radial Mapping (Semantic Disk)**: Thread anchor position is defined purely on the 2D XZ plane. The bearing is derived from dimensions `[0]` and `[2]`: `angle = Math.atan2(vector[2], vector[0])`. Position maps as `[Math.cos(angle) * Dn * ui_scale * 50, 0, Math.sin(angle) * Dn * ui_scale * 50]`.
+        *   **Local Space Mapping (Visual DNA)**:
             *   `X`: Linear stretch of the dimensions `(index - 512) * xStretch`. `xStretch` scales dynamically between `0.1` and `40.0`.
-            *   `Y`: Amplitude spikes evaluated natively and controlled by global dynamic scalar `vectorValue * amplitude` (up to `50.0`).
-            *   `Z`: Local Z is 0. Group encapsulation handles global offset.
+            *   `Y`: The $Y$-axis is entirely reserved for dimension magnitude, growing functionally upwards from the anchor floor: `vectorValue * amplitude`. Target amplitude spans to `50.0`.
+            *   `Z`: Local Z is 0. Group encapsulation handles global offset on the 2D plane.
     *   **Chromatic Mapping Algorithm**:
         *   `~1.0`: Bright White/Yellow/Green (Emissive).
         *   `~0.0`: Opacity 0.1 / Transparent (Fragment discard via shader).
@@ -74,7 +74,8 @@ FILE: manifest.json
         "hyper_boost_physics": true,
         "radial_cosine_distance": true,
         "ui_scale_factor_control": true,
-        "ui_scale_factor_bugfix": true
+        "ui_scale_factor_bugfix": true,
+        "semantic_disk_topology": true
     },
     "constraints": {
         "manifold_bounds": [
@@ -2582,12 +2583,46 @@ def test_vector_magnitudes_safe_math():
         log_fail("Exception", str(e))
         return False
 
+def test_xz_layout_bearing_math():
+    log_section("Testing XZ Layout 2D Bearing Safe Math Guard")
+    try:
+        import math
+        vec_n = [0.0] * 1024
+        
+        # Test zero vector (should map to 0,0 gracefully or throw no NaNs)
+        try:
+            angle = math.atan2(vec_n[2], vec_n[0])
+            norm_x = math.cos(angle)
+            norm_z = math.sin(angle)
+            if math.isnan(norm_x) or math.isnan(norm_z):
+                log_fail("SafeMath failed: Math.atan2/cos produced NaN on zero vector")
+                return False
+        except Exception as e:
+            log_fail(f"SafeMath failed: {e}")
+            return False
+
+        # Test valid vector
+        vec_v = [1.0, 0.5, -0.5] + [0.1] * 1021
+        angle_v = math.atan2(vec_v[2], vec_v[0])
+        norm_x_v = math.cos(angle_v)
+        norm_z_v = math.sin(angle_v)
+        
+        if math.isnan(norm_x_v) or math.isnan(norm_z_v):
+            log_fail("SafeMath failed: Math.atan2/cos produced NaN on valid vector")
+            return False
+
+        log_success("SafeMath XZ Layout 2D Bearing OK")
+        return True
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
         test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
         test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
-        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math
+        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math
     ]
     all_passed = True
     for test in tests:
@@ -3176,8 +3211,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   useEffect(() => {
     if (!meshRef.current || !data) return;
 
-    // RENDER GUARD: Strictly abort setMatrixAt execution if vector is not exactly 1024 floats
-    if (data.length !== 1024 || data.some(v => Number.isNaN(v) || typeof v !== 'number')) {
+    // RENDER GUARD: Strictly abort setMatrixAt execution if vector is not exactly 1024 floats or contains NaN
+    if (!data || data.length !== 1024 || data.some(v => v === null || Number.isNaN(v) || typeof v !== 'number')) {
       return;
     }
 
@@ -3215,7 +3250,7 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
     setLinePoints(points);
   }, [data, xStretch, amplitude, dummy]);
 
-  if (!data || data.length !== 1024) return null;
+  if (!data || data.length !== 1024 || data.some(v => v === null || Number.isNaN(v) || typeof v !== 'number')) return null;
 
   return (
     <group position={position}>
@@ -3435,7 +3470,8 @@ const TargetingHUD: React.FC = () => {
   );
 };
 
-const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number }> = ({ nodes, xStretch }) => {
+// XZ Plane Raycaster Probe
+const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor: number }> = ({ nodes, xStretch, uiScaleFactor }) => {
   const { camera } = useThree();
   const setHoveredDimensionIndex = useSemanticStore(state => state.setHoveredDimensionIndex);
   const setSelectedValues = useSemanticStore(state => state.setSelectedValues);
@@ -3449,29 +3485,57 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number }> = ({ nodes,
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
-    const targetZ = -10;
-    if (Math.abs(raycaster.ray.direction.z) > 0.0001) {
-      const t = (targetZ - raycaster.ray.origin.z) / raycaster.ray.direction.z;
+    // Raycast towards Y=0 plane (the Semantic Disk floor)
+    if (Math.abs(raycaster.ray.direction.y) > 0.0001) {
+      const t = (0 - raycaster.ray.origin.y) / raycaster.ray.direction.y;
       if (t > 0) {
         const hitPoint = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(t));
-        let targetedIndex = Math.round((hitPoint.x / xStretch) + 512);
 
-        const yTop = 5;
-        const yBottom = 5 - (3 * 2.5);
+        let closestNodeIdx = -1;
+        let minZDist = Infinity;
+        let closestPosX = 0;
 
-        if (targetedIndex >= 0 && targetedIndex < 1024 && hitPoint.y <= yTop + 2 && hitPoint.y >= yBottom - 2) {
-          setHoveredDimensionIndex(targetedIndex);
-          const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
-          setSelectedValues(values);
-        } else {
-          setHoveredDimensionIndex(null);
+        for (let i = 0; i < nodes.length; i++) {
+          const n = nodes[i];
+          let posZ = 0;
+          let posX = 0;
+
+          if (i > 0 && n.vector && n.vector.length >= 3 && nodes[0]?.vector) {
+            const vA = nodes[0].vector;
+            const magA = Math.sqrt(vA.reduce((sum, val) => sum + val * val, 0));
+            const magN = Math.sqrt(n.vector.reduce((sum, val) => sum + val * val, 0));
+            let dn = 1;
+            if (magA > 0 && magN > 0) {
+              const dot = vA.reduce((sum, val, idx) => sum + val * (n.vector![idx] || 0), 0);
+              dn = 1 - (dot / (magA * magN));
+            }
+            const angle = Math.atan2(n.vector[2], n.vector[0]);
+            posX = Math.cos(angle) * dn * uiScaleFactor * 50.0;
+            posZ = Math.sin(angle) * dn * uiScaleFactor * 50.0;
+          }
+
+          const distZ = Math.abs(hitPoint.z - posZ);
+          if (distZ < minZDist) {
+            minZDist = distZ;
+            closestNodeIdx = i;
+            closestPosX = posX;
+          }
         }
-      } else {
-        setHoveredDimensionIndex(null);
+
+        if (closestNodeIdx !== -1 && minZDist < 10.0) {
+          let targetedIndex = Math.round(((hitPoint.x - closestPosX) / xStretch) + 512);
+
+          if (targetedIndex >= 0 && targetedIndex < 1024) {
+            setHoveredDimensionIndex(targetedIndex);
+            const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
+            setSelectedValues(values);
+            return;
+          }
+        }
       }
-    } else {
-      setHoveredDimensionIndex(null);
     }
+
+    setHoveredDimensionIndex(null);
   });
 
   return null;
@@ -3783,7 +3847,7 @@ const ArithmeticHUD: React.FC = () => {
       {/* 3D Canvas */}
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
-        <ProbeSystem nodes={nodes} xStretch={xStretch} />
+        <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
 
@@ -3801,17 +3865,15 @@ const ArithmeticHUD: React.FC = () => {
               dn = 1 - (dot / (magA * magN));
             }
             if (node.vector.length >= 3) {
-              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
-              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
-              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
-              const normX = dir3D[0] / (dirMag3D || 1);
-              const normY = dir3D[1] / (dirMag3D || 1);
-              const normZ = dir3D[2] / (dirMag3D || 1);
+              // 2D Directional Mapping: XZ Layout (Semantic Disk)
+              const angle = Math.atan2(node.vector[2], node.vector[0]);
+              const normX = Math.cos(angle);
+              const normZ = Math.sin(angle);
 
               const BASE_SPREAD = 50.0;
               pos = [
                 normX * dn * uiScaleFactor * BASE_SPREAD,
-                normY * dn * uiScaleFactor * BASE_SPREAD,
+                0, // Strictly anchored to the floor
                 normZ * dn * uiScaleFactor * BASE_SPREAD
               ];
             }
@@ -3822,7 +3884,7 @@ const ArithmeticHUD: React.FC = () => {
                 <meshStandardMaterial color={node.color} emissive={node.color} emissiveIntensity={0.5} />
               </Sphere>
               <Text
-                position={[0, 0.6, 0]}
+                position={[0, 0, 0]}
                 fontSize={0.5}
                 color={node.color}
                 anchorX="center"
@@ -3852,17 +3914,15 @@ const ArithmeticHUD: React.FC = () => {
               dn = 1 - (dot / (magA * magN));
             }
             if (node.vector.length >= 3) {
-              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
-              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
-              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
-              const normX = dir3D[0] / (dirMag3D || 1);
-              const normY = dir3D[1] / (dirMag3D || 1);
-              const normZ = dir3D[2] / (dirMag3D || 1);
+              // 2D Directional Mapping: XZ Layout (Semantic Disk)
+              const angle = Math.atan2(node.vector[2], node.vector[0]);
+              const normX = Math.cos(angle);
+              const normZ = Math.sin(angle);
 
               const BASE_SPREAD = 50.0;
               pos = [
                 normX * dn * uiScaleFactor * BASE_SPREAD,
-                normY * dn * uiScaleFactor * BASE_SPREAD,
+                0, // Strictly anchored to the floor
                 normZ * dn * uiScaleFactor * BASE_SPREAD
               ];
             }

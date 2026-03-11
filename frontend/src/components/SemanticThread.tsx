@@ -80,8 +80,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   useEffect(() => {
     if (!meshRef.current || !data) return;
 
-    // RENDER GUARD: Strictly abort setMatrixAt execution if vector is not exactly 1024 floats
-    if (data.length !== 1024 || data.some(v => Number.isNaN(v) || typeof v !== 'number')) {
+    // RENDER GUARD: Strictly abort setMatrixAt execution if vector is not exactly 1024 floats or contains NaN
+    if (!data || data.length !== 1024 || data.some(v => v === null || Number.isNaN(v) || typeof v !== 'number')) {
       return;
     }
 
@@ -119,7 +119,7 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
     setLinePoints(points);
   }, [data, xStretch, amplitude, dummy]);
 
-  if (!data || data.length !== 1024) return null;
+  if (!data || data.length !== 1024 || data.some(v => v === null || Number.isNaN(v) || typeof v !== 'number')) return null;
 
   return (
     <group position={position}>

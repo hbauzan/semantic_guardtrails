@@ -334,12 +334,46 @@ def test_vector_magnitudes_safe_math():
         log_fail("Exception", str(e))
         return False
 
+def test_xz_layout_bearing_math():
+    log_section("Testing XZ Layout 2D Bearing Safe Math Guard")
+    try:
+        import math
+        vec_n = [0.0] * 1024
+        
+        # Test zero vector (should map to 0,0 gracefully or throw no NaNs)
+        try:
+            angle = math.atan2(vec_n[2], vec_n[0])
+            norm_x = math.cos(angle)
+            norm_z = math.sin(angle)
+            if math.isnan(norm_x) or math.isnan(norm_z):
+                log_fail("SafeMath failed: Math.atan2/cos produced NaN on zero vector")
+                return False
+        except Exception as e:
+            log_fail(f"SafeMath failed: {e}")
+            return False
+
+        # Test valid vector
+        vec_v = [1.0, 0.5, -0.5] + [0.1] * 1021
+        angle_v = math.atan2(vec_v[2], vec_v[0])
+        norm_x_v = math.cos(angle_v)
+        norm_z_v = math.sin(angle_v)
+        
+        if math.isnan(norm_x_v) or math.isnan(norm_z_v):
+            log_fail("SafeMath failed: Math.atan2/cos produced NaN on valid vector")
+            return False
+
+        log_success("SafeMath XZ Layout 2D Bearing OK")
+        return True
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
         test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
         test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
-        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math
+        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math
     ]
     all_passed = True
     for test in tests:

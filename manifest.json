@@ -24,7 +24,8 @@
         "hyper_boost_physics": true,
         "radial_cosine_distance": true,
         "ui_scale_factor_control": true,
-        "ui_scale_factor_bugfix": true
+        "ui_scale_factor_bugfix": true,
+        "semantic_disk_topology": true
     },
     "constraints": {
         "manifold_bounds": [
