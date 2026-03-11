@@ -1,6 +1,6 @@
 {
     "project": "Semantic Guardrails",
-    "version": "0.2.0",
+    "version": "0.4.1",
     "active_features": {
         "neural_core_bge_m3": true,
         "vector_arithmetic": true,
@@ -8,7 +8,23 @@
         "context_packager": true,
         "flight_mechanics_awsd": true,
         "exponential_thrust_shift": true,
-        "pointer_lock_controls": true
+        "pointer_lock_controls": true,
+        "semantic_ribbon_trace": true,
+        "positive_delta_separation": false,
+        "log_z_separation": false,
+        "protected_ordinal_layering": false,
+        "dynamic_z_spread": false,
+        "thread_color_pickers": true,
+        "dna_accordion_topology": true,
+        "dynamic_amplitude_stretch": true,
+        "deep_observability_telemetry": true,
+        "dimension_probe_crosshair": true,
+        "infinite_dna_visibility": true,
+        "anti_error_guardrails": true,
+        "hyper_boost_physics": true,
+        "radial_cosine_distance": true,
+        "ui_scale_factor_control": true,
+        "ui_scale_factor_bugfix": true
     },
     "constraints": {
         "manifold_bounds": [

@@ -24,6 +24,7 @@ class EmbedRequest(BaseModel):
 
 class TokenizeRequest(BaseModel):
     text: str
+    include_raw_vector: bool = False
 
 class SimulateRequest(BaseModel):
     text: str
@@ -182,8 +183,8 @@ async def tokenize_text(
         # geometry.transform returns numpy array, convert to list
         token_obj['xyz'] = xyz_matrix[i].tolist()
         
-        # Remove heavy 768d vector
-        if 'vector' in token_obj:
+        # Remove heavy 768d/1024d vector unless explicitly requested
+        if 'vector' in token_obj and not request.include_raw_vector:
             del token_obj['vector']
             
         final_tokens.append(token_obj)

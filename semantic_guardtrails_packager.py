@@ -88,8 +88,37 @@ if __name__ == "__main__":
     
     # Archivos extra adaptados al nuevo proyecto
     extras =[
+        "README.md",
         "backend/requirements.txt",
-        "backend/.env"
+        "frontend/package.json",
+        "backend/app/modules/storage.py",
+        "backend/app/api/routes.py",
+        "backend/app/core/config.py",
+        "backend/app/modules/context_vault.py",
+        "backend/app/modules/identity.py",
+        "backend/app/main.py",
+        "backend/recalibrate.py",
+        "backend/app/core/dependencies.py",
+        "backend/app/modules/geometry.py",
+        "backend/app/modules/embedder.py",
+        "backend/app/modules/ingestor.py",
+        "backend/ingest_vocab.py",
+        "backend/ingest_dictionaries.py",
+        "backend/perform_tests.py",
+        "setup_wizard.py",
+        "semantic_guardtrails_packager.py",
+        "run_commander.sh",
+        "run_server.sh",
+        "run_ui.sh",
+        "run_tests.sh",
+        "backend/.env",
+        "frontend/src/main.tsx",
+        "frontend/src/App.tsx",
+        "frontend/src/hooks/useKeyboardControls.ts",
+        "frontend/src/components/SemanticThread.tsx", 
+        "frontend/src/components/ArithmeticHUD.tsx",
+        "frontend/src/ArithmeticVisualizer.tsx",
+        "frontend/src/store.ts"
     ]
     
     orchestrator.create_bundle(mision + extras)

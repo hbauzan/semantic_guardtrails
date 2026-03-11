@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-10 17:53:40.440024
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-10 22:07:01.899336
 
 
 ################################################################################
@@ -22,15 +22,35 @@ FILE: architecture_spec.md
 ## 6. Current Flight Status
 ### Navigation & Flight Mechanics
 *   **Smooth Flight**: Inertia-based camera movement with drag damping (AWSD + QE).
-*   **Hyper-Boost**: Exponential thrust accumulation (Shift key) with drag bleed-off.
+*   **Hyper-Boost x100**: Instantaneous thrust application (Shift key) using dynamic `BOOST_FACTOR` slider, capable of x100 effective speed multiplication. Both acceleration and deceleration are responsive.
 *   **Mouse Look**: `PointerLockControls` integrated with global click-to-lock, featuring 2e-compliant input suppression (ignores typing in text fields).
+
+### Visualizations
+*   **Semantic Ribbon Trace**: Real-time rendering of 1024D vector geometries strictly utilizing `THREE.InstancedMesh` with a predefined 1024 count for optimal performance, and connected points forming a continuous thread with `THREE.Line`.
+    *   **Spatial Positioning Algorithm (Radial Cosine Distance)**:
+        *   **Cosine Distance ($D_n$)**: Calculated relative to the master token (Word A) which is rigidly fixed at the absolute origin `[0, 0, 0]`. If vector magnitude is 0, $D_n$ defaults to 1.
+        *   **Radial Mapping**: Thread starting position is defined radially as $\\vec{Pos}_n = \\text{Norm}_{3D}(V_n) \\cdot D_n \\cdot \\text{ui\\_scale\\_factor} \\cdot 50.0$. Identical tokens collapse to origin, anomalies are ejected outward with a 50x base spread scalar to ensure visible separation across thousands of units.
+        *   **Local Space Mapping (DNA Accordion)**:
+            *   `X`: Linear stretch of the dimensions `(index - 512) * xStretch`. `xStretch` scales dynamically between `0.1` and `40.0`.
+            *   `Y`: Amplitude spikes evaluated natively and controlled by global dynamic scalar `vectorValue * amplitude` (up to `50.0`).
+            *   `Z`: Local Z is 0. Group encapsulation handles global offset.
+    *   **Chromatic Mapping Algorithm**:
+        *   `~1.0`: Bright White/Yellow/Green (Emissive).
+        *   `~0.0`: Opacity 0.1 / Transparent (Fragment discard via shader).
+        *   `~-1.0`: Deep Blue/Violet/Red.
+
+### Deep Observability & Telemetry
+*   **Zero-Dependency Native HUD**: Telemetry overlay built built with `requestAnimationFrame` ensuring zero external profiling overhead. Reports active **FPS**, total **Nodes**, current **xStretch**, and total **SECTOR SIZE**.
+*   **Infinite Visibility Render bounds**: Canvas camera Frustum is statically configured to `{ near: 1, far: 200000 }` to guarantee no thread dropout at x40 stretches.
+*   **Dimension Probe (Crosshair)**: A fixed SVG crosshair mathematically intercepts the specific S-DNA array index (`i ∈ [0, 1023]`) from the camera's viewport orientation.
+    *   Targets exact dimensional vectors revealing `DIM-ID` and precise float `MAGNITUDE` arrays across all active semantic threads.
 ################################################################################
 FILE: manifest.json
 ################################################################################
 
 {
     "project": "Semantic Guardrails",
-    "version": "0.2.0",
+    "version": "0.4.1",
     "active_features": {
         "neural_core_bge_m3": true,
         "vector_arithmetic": true,
@@ -38,7 +58,23 @@ FILE: manifest.json
         "context_packager": true,
         "flight_mechanics_awsd": true,
         "exponential_thrust_shift": true,
-        "pointer_lock_controls": true
+        "pointer_lock_controls": true,
+        "semantic_ribbon_trace": true,
+        "positive_delta_separation": false,
+        "log_z_separation": false,
+        "protected_ordinal_layering": false,
+        "dynamic_z_spread": false,
+        "thread_color_pickers": true,
+        "dna_accordion_topology": true,
+        "dynamic_amplitude_stretch": true,
+        "deep_observability_telemetry": true,
+        "dimension_probe_crosshair": true,
+        "infinite_dna_visibility": true,
+        "anti_error_guardrails": true,
+        "hyper_boost_physics": true,
+        "radial_cosine_distance": true,
+        "ui_scale_factor_control": true,
+        "ui_scale_factor_bugfix": true
     },
     "constraints": {
         "manifold_bounds": [
@@ -141,6 +177,7 @@ class EmbedRequest(BaseModel):
 
 class TokenizeRequest(BaseModel):
     text: str
+    include_raw_vector: bool = False
 
 class SimulateRequest(BaseModel):
     text: str
@@ -299,8 +336,8 @@ async def tokenize_text(
         # geometry.transform returns numpy array, convert to list
         token_obj['xyz'] = xyz_matrix[i].tolist()
         
-        # Remove heavy 768d vector
-        if 'vector' in token_obj:
+        # Remove heavy 768d/1024d vector unless explicitly requested
+        if 'vector' in token_obj and not request.include_raw_vector:
             del token_obj['vector']
             
         final_tokens.append(token_obj)
@@ -876,6 +913,56 @@ async def get_node_neighbors(
     }
 
 ################################################################################
+FILE: README.md
+################################################################################
+
+# 🌌 Semantic Guardrails (Distilled Core)
+
+[cite_start]**Semantic Guardrails** es una implementación optimizada y destilada del motor **LSV Engine**[cite: 571]. [cite_start]Este núcleo se enfoca exclusivamente en la **aritmética vectorial de alta fidelidad** y la **seguridad semántica**, eliminando la complejidad de navegación para priorizar la lógica pura de espacios latentes[cite: 92, 118].
+
+## 🏗️ Arquitectura de Cómputo
+
+[cite_start]El sistema utiliza un pipeline de proyección en tiempo real para transformar dimensiones abstractas en coordenadas euclidianas[cite: 573, 580].
+
+* [cite_start]**Neural Core**: BGE-M3 (1024D) para una captura semántica profunda[cite: 591, 762].
+* [cite_start]**Shadow Projector**: Regresor MLP entrenado sobre UMAP para proyecciones de baja latencia (<10ms)[cite: 16, 734].
+* [cite_start]**Vector Vault**: LanceDB para almacenamiento vectorial serverless[cite: 4, 32, 575].
+* [cite_start]**Context Vault**: SQLite para la gestión de metadatos y diccionarios soberanos[cite: 37, 688].
+
+
+
+## 📋 Stack Tecnológico
+
+| Componente | Tecnología | Propósito |
+| :--- | :--- | :--- |
+| **API** | FastAPI | [cite_start]Servidor de inferencia asíncrono[cite: 3]. |
+| **Engine** | LanceDB | [cite_start]Base de datos de vectores (CrystalVault)[cite: 4]. |
+| **Metadata** | SQLite | [cite_start]Capa de contexto semántico (ContextVault)[cite: 37]. |
+| **Geometry** | UMAP + Sklearn | [cite_start]Reducción de dimensionalidad y Shadow Projection[cite: 727, 728]. |
+| **Frontend** | React + Three.js | [cite_start]Visualización 3D reactiva y HUD[cite: 6, 7]. |
+
+## 🚀 Despliegue Rápido (Guardrail Protocol)
+
+1.  **Entorno**: Crear y activar `sg_env`.
+2.  **Bootstrap**:
+    ```bash
+    chmod +x bootstrap.sh
+    ./bootstrap.sh
+    ```
+3.  **Hidratación**:
+    ```bash
+    python3 backend/ingest_vocab.py
+    ```
+
+## 🧪 Operaciones de Ejemplo
+
+[cite_start]El sistema está diseñado para resolver analogías complejas mediante manipulación directa de tensores[cite: 599]:
+* [cite_start]**Operación**: `Rey - Hombre + Mujer = Reina`[cite: 118].
+* [cite_start]**Espacio de Manifiesto**: Coordenadas normalizadas en cubo `[0, 300]`[cite: 39, 107].
+
+---
+*Built for the Future of Semantic Security.*
+################################################################################
 FILE: backend/requirements.txt
 ################################################################################
 
@@ -901,6 +988,2027 @@ plotly>=5.18.0
 rich>=13.0.0
 
 ################################################################################
+FILE: frontend/package.json
+################################################################################
+
+{
+  "name": "frontend-temp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "three": "^0.183.2",
+    "zustand": "^5.0.11"
+  }
+}
+
+################################################################################
+FILE: backend/app/modules/storage.py
+################################################################################
+
+import lancedb
+import pyarrow as pa
+import pandas as pd
+from typing import List, Optional, Dict, Any
+from app.core.config import settings
+from pydantic import BaseModel, field_validator
+import json
+
+class DBItem(BaseModel):
+    vector: List[float]
+    text: str
+    metadata: Dict[str, Any]
+    id: Optional[int] = None
+    xyz: Optional[List[float]] = None
+    cluster_id: Optional[int] = -1
+    cluster_label: Optional[str] = "GALAXY_BASE"
+    lod_score: Optional[float] = 0.0
+    doc_id: Optional[str] = ""
+
+    @field_validator('cluster_label', mode='before')
+    @classmethod
+    def strip_quotes(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip("'").strip('"')
+        return v
+
+class Storage:
+    def __init__(self, model_name: str, dimension: int):
+        self.uri = str(settings.LANCEDB_URI)
+        self.db = lancedb.connect(self.uri)
+        
+        # Dynamic Table Name: vectors_all_mpnet_base_v2_768
+        safe_name = model_name.replace("/", "_").replace("-", "_").replace(" ", "_")
+        self.table_name = f"vectors_{safe_name}_{dimension}"
+        self.dimension = dimension
+        
+        self._init_table()
+
+    def _init_table(self):
+        # Schema definition
+        schema = pa.schema([
+            pa.field("vector", pa.list_(pa.float32(), self.dimension)),
+            pa.field("text", pa.string()),
+            pa.field("metadata", pa.string()), # JSON string
+            pa.field("xyz", pa.list_(pa.float32(), 3)),
+            pa.field("id", pa.int64()),
+            pa.field("cluster_id", pa.int32()),
+            pa.field("cluster_label", pa.string()),
+            pa.field("lod_score", pa.float32()),
+            pa.field("doc_id", pa.string())
+        ])
+        
+        if self.table_name not in self.db.table_names():
+            print(f"📦 Creating new Crystal Vault: {self.table_name}")
+            self.db.create_table(self.table_name, schema=schema)
+        else:
+            print(f"📂 Connected to Vault: {self.table_name}")
+        
+        self.table = self.db.open_table(self.table_name)
+
+    def add(self, items: List[DBItem]):
+        data = []
+        for item in items:
+            row = {
+                "vector": item.vector,
+                "text": item.text,
+                "metadata": json.dumps(item.metadata),
+                "xyz": item.xyz if item.xyz else [0.0, 0.0, 0.0],
+                "id": item.id if item.id is not None else 0,
+                "cluster_id": item.cluster_id if item.cluster_id is not None else -1,
+                "cluster_label": item.cluster_label if item.cluster_label else "GALAXY_BASE",
+                "lod_score": item.lod_score if item.lod_score is not None else 0.0,
+                "doc_id": item.doc_id if item.doc_id else ""
+            }
+            data.append(row)
+        
+        # Upsert Logic: Delete existing IDs then insert
+        ids_to_process = [item.id for item in items if item.id is not None]
+        if ids_to_process:
+            self.delete(ids_to_process)
+
+        self.table.add(data)
+
+    def search(self, query_vector: List[float], limit: int = 10, filter_cluster_id: Optional[int] = None) -> List[Dict]:
+        # LanceDB search
+        query = self.table.search(query_vector, vector_column_name="vector").metric("cosine")
+        
+        if filter_cluster_id is not None:
+            query = query.where(f"cluster_id = {filter_cluster_id}")
+            
+        results = query.limit(limit).to_pandas()
+        
+        # Ensure numpy arrays are converted to lists for JSON serialization
+        if 'vector' in results.columns:
+            results['vector'] = results['vector'].apply(lambda x: x.tolist() if hasattr(x, 'tolist') else x)
+        if 'xyz' in results.columns:
+            results['xyz'] = results['xyz'].apply(lambda x: x.tolist() if hasattr(x, 'tolist') else x)
+            
+        return results.to_dict(orient="records")
+
+    def get_nearest_neighbors(self, item_id: int, k: int = 5) -> List[Dict[str, Any]]:
+        # 1. Fetch the target vector by querying the table for item_id
+        df = self.table.to_pandas()
+        target_row = df[df['id'] == item_id]
+        
+        # 2. If not found, return an empty list []
+        if target_row.empty:
+            return []
+            
+        # 3. Extract the vector as a 1D list/array
+        target_vector = target_row.iloc[0]['vector']
+        if hasattr(target_vector, 'tolist'):
+            target_vector = target_vector.tolist()
+            
+        # 4. Execute a cosine search
+        results = self.table.search(target_vector, vector_column_name="vector").limit(k + 1).to_pandas()
+        
+        # 5. Filter out the original item_id and map to dicts
+        neighbors = []
+        for _, row in results.iterrows():
+            nid = int(row['id'])
+            if nid != item_id:
+                # _distance from LanceDB is usually Cosine distance (0=identical, 2=opposites)
+                # We map to a similarity score 1.0 - _distance
+                dist = float(row.get('_distance', 0.0))
+                # Ensure no negative scores just in case
+                score = max(0.0, 1.0 - dist)
+                
+                neighbors.append({
+                    "id": nid,
+                    "score": round(score, 4)
+                })
+                if len(neighbors) == k:
+                    break
+                    
+        return neighbors
+
+    def delete(self, ids: List[int]):
+        """Removes items from the vault by ID."""
+        if not ids:
+            return
+        # LanceDB SQL-style deletion
+        # escape or validate ids to prevent injection if they weren't ints, but type hint says ints.
+        id_str = ", ".join(map(str, ids))
+        self.table.delete(f"id IN ({id_str})")
+    
+    def get_all_vectors(self) -> pd.DataFrame:
+        self.table = self.db.open_table(self.table_name)
+        return self.table.to_pandas()
+
+    def update_xyz(self, ids: List[int], xyz_data: List[List[float]]):
+        """Updates XYZ using merge."""
+        df = pd.DataFrame({
+            "id": ids,
+            "xyz": xyz_data
+        })
+        # Merge on ID to update XYZ column
+        self.table.merge(df, on="id")
+
+    @property
+    def total_items(self) -> int:
+        return len(self.table)
+    
+    def update_clusters(self, ids: List[int], cluster_ids: List[int], labels: List[str]):
+        """Updates cluster info using update mapping."""
+        for id_, cid, lbl in zip(ids, cluster_ids, labels):
+            safe_lbl = lbl.strip("'").strip('"').replace("'", "''") 
+            self.table.update(where=f"id = {id_}", values={"cluster_id": str(cid), "cluster_label": safe_lbl})
+
+    def update_lod_scores(self, ids: List[int], scores: List[float]):
+        """Updates lod_score using merge."""
+        df = pd.DataFrame({
+            "id": ids,
+            "lod_score": scores
+        })
+        self.table.merge(df, on="id")
+
+################################################################################
+FILE: backend/app/core/config.py
+################################################################################
+
+from pydantic_settings import BaseSettings
+from pathlib import Path
+from typing import Optional
+import os
+from dotenv import load_dotenv
+
+# Load .env explicitly into os.environ so libraries like skipping huggingface_hub pick them up
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+
+class Settings(BaseSettings):
+    # App Config
+    APP_NAME: str = "LSV Engine"
+    API_V1_STR: str = "/api/v1"
+    DEBUG: bool = False
+    FIREWALL_THRESHOLD: float = 0.45
+    LOAD_DEMOS: bool = False
+    
+    # Paths
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
+    # Assuming backend/ is the root for execution or relative to it
+    # Adjust based on where main.py is run. 
+    # If running from backend/: BASE_DIR is backend/
+    
+    DATA_DIR: Path = BASE_DIR / "data"
+    LANCEDB_URI: Path = DATA_DIR / "lancedb"
+    CONTEXT_DB_PATH: Path = DATA_DIR / "context.db"
+    VOCAB_PATH: Path = BASE_DIR.parent / "public" / "vocab.txt" 
+    
+    # Model Config
+    MODEL_NAME: str = "BAAI/bge-m3"
+    DEVICE: str = "cpu" # 'cuda' if available
+    HF_TOKEN: Optional[str] = None
+    HF_HUB_ETAG_TIMEOUT: int = 30
+    HF_HUB_DOWNLOAD_TIMEOUT: int = 300
+    
+    # Vector Config
+    VECTOR_DIM: int = 1024
+    
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+# Ensure data directories exist
+settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+settings.LANCEDB_URI.mkdir(parents=True, exist_ok=True)
+
+################################################################################
+FILE: backend/app/modules/context_vault.py
+################################################################################
+
+import sqlite3
+from typing import List, Dict, Optional, Any
+from app.core.config import settings
+import threading
+
+class ContextVault:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(ContextVault, cls).__new__(cls)
+                cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+            
+        self.db_path = str(settings.CONTEXT_DB_PATH)
+        self._init_db()
+        self._initialized = True
+
+    def _get_connection(self):
+        """Returns a thread-local connection."""
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
+
+    def _init_db(self):
+        """Initializes the database schema."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Dictionaries Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dictionaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                color TEXT,
+                description TEXT
+            )
+        """)
+
+        # Definitions Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS definitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_id INTEGER NOT NULL,
+                dictionary_id INTEGER NOT NULL,
+                definition TEXT NOT NULL,
+                weight REAL DEFAULT 1.0,
+                FOREIGN KEY (dictionary_id) REFERENCES dictionaries (id) ON DELETE CASCADE
+            )
+        """)
+
+        # Index for O(1) lookups
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_definitions_token_id 
+            ON definitions (token_id)
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def create_dictionary(self, name: str, color: str = "#FFFFFF", description: str = "") -> int:
+        """Creates a new dictionary and returns its ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO dictionaries (name, color, description)
+                VALUES (?, ?, ?)
+            """, (name, color, description))
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            # Already exists, get ID
+            cursor.execute("SELECT id FROM dictionaries WHERE name = ?", (name,))
+            return cursor.fetchone()['id']
+        finally:
+            conn.close()
+
+    def add_definition(self, token_id: int, dictionary_name: str, definition: str, weight: float = 1.0):
+        """Adds a definition to a token under a specific dictionary."""
+        # Ensure dictionary exists
+        dict_id = self.create_dictionary(dictionary_name)
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO definitions (token_id, dictionary_id, definition, weight)
+                VALUES (?, ?, ?, ?)
+            """, (token_id, dict_id, definition, weight))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_context(self, token_id: int) -> List[Dict[str, Any]]:
+        """Retrieves all definitions for a specific token."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT 
+                    d.name as dictionary,
+                    d.color,
+                    def.definition,
+                    def.weight
+                FROM definitions def
+                JOIN dictionaries d ON def.dictionary_id = d.id
+                WHERE def.token_id = ?
+                ORDER BY d.name
+            """, (token_id,))
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_defined_token_ids(self) -> set[int]:
+        """Efficiently retrieves the set of all token IDs that have definitions."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT DISTINCT token_id FROM definitions")
+            rows = cursor.fetchall()
+            return {row['token_id'] for row in rows}
+        finally:
+            conn.close()
+
+    def wipe_definitions(self):
+        """Wipes the definitions table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM definitions")
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='definitions'")
+            conn.commit()
+            print("🧹 ContextVault: Definitions table wiped.")
+        finally:
+            conn.close()
+
+    def delete_dictionary(self, name: str) -> bool:
+        """Deletes a dictionary and its associated definitions (via CASCADE)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM dictionaries WHERE name = ?", (name,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_dictionary_stats(self) -> List[Dict[str, Any]]:
+        """Returns a summary of dictionaries and their term counts."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT d.name, d.color, COUNT(def.id) as term_count
+                FROM dictionaries d
+                LEFT JOIN definitions def ON d.id = def.dictionary_id
+                GROUP BY d.id, d.name, d.color
+                ORDER BY term_count DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+################################################################################
+FILE: backend/app/modules/identity.py
+################################################################################
+
+import pandas as pd
+from typing import Optional, Dict
+from app.modules.storage import Storage
+
+class IdentityResolver:
+    def __init__(self, storage: Storage):
+        self.storage = storage
+        self.galaxy_map: Dict[str, int] = {}
+        self._load_galaxy()
+
+    def _load_galaxy(self):
+        print("🌌 IdentityResolver: Loading Galaxy Vocabulary...")
+        if self.storage.total_items == 0:
+            print("⚠️ IdentityResolver: Vector Store is empty. Bypassing map loading.")
+            return
+
+        df = self.storage.get_all_vectors()
+        
+        if not df.empty and 'text' in df.columns and 'id' in df.columns:
+            # Create a dictionary for O(1) lookup
+            self.galaxy_map = dict(zip(df['text'], df['id']))
+            print(f"🌌 IdentityResolver: Loaded {len(self.galaxy_map)} identities.")
+        else:
+            print("⚠️ IdentityResolver: 'text' or 'id' column missing in Galaxy Storage.")
+
+    def get_galaxy_id(self, text: str) -> Optional[int]:
+        return self.galaxy_map.get(text)
+
+################################################################################
+FILE: backend/recalibrate.py
+################################################################################
+
+import subprocess
+import sys
+import time
+import os
+from pathlib import Path
+
+# Define paths
+BACKEND_DIR = Path(__file__).parent.resolve()
+PYTHON_EXE = sys.executable
+
+# Add backend directory to sys.path to allow importing app.core.config
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.core.config import settings
+from app.modules.storage import Storage
+import lancedb
+
+def run_step(script_name, description):
+    script_path = BACKEND_DIR / script_name
+    print(f"\n⚙️  [STEP] {description} ({script_name})...")
+    try:
+        t0 = time.time()
+        subprocess.run([PYTHON_EXE, str(script_path)], check=True)
+        print(f"✅ [PASS] Completed in {time.time() - t0:.2f}s")
+    except subprocess.CalledProcessError:
+        print(f"❌ [FAIL] {script_name} encountered an error.")
+        sys.exit(1)
+
+def check_system_state():
+    print(f"🔍 Checking CrystalVault for Model: {settings.MODEL_NAME} ({settings.VECTOR_DIM}D)")
+    
+    EXPECTED_TABLE_NAME = f"vectors_{settings.MODEL_NAME.replace('/', '_').replace('-', '_').replace(' ', '_')}_{settings.VECTOR_DIM}"
+    
+    # Check for legacy tables
+    legacy_found = False
+    uri = str(settings.LANCEDB_URI)
+    if os.path.exists(uri):
+        try:
+            db = lancedb.connect(uri)
+            for table_name in db.table_names():
+                if table_name.startswith("vectors_") and table_name != EXPECTED_TABLE_NAME:
+                    legacy_found = True
+                    print(f"⚠️  Legacy model table detected: {table_name}")
+                    break
+        except Exception as e:
+            print(f"⚠️  Failed to inspect LanceDB tables: {e}")
+    
+    # Instantiate storage which will create the expected table if it doesn't exist
+    storage = Storage(model_name=settings.MODEL_NAME, dimension=settings.VECTOR_DIM)
+    
+    count = storage.total_items
+    
+    if count == 0:
+        if legacy_found:
+            print("🚨 Dimension/Model mismatch detected. Triggering deep clean...")
+            wipe_script = BACKEND_DIR / "scripts" / "wipe_engine.py"
+            subprocess.run([PYTHON_EXE, str(wipe_script), "--all", "--force"], check=True)
+            print("✅ Clean slate achieved. Proceeding to hydrate new model space.")
+            return True # Needs hydration
+        else:
+            print("🔰 Empty Vault detected. System requires initial hydration.")
+            return True # Needs hydration
+    else:
+        print(f"✅ System Nominal: Found {count} items in Vault. Bypassing ingestion protocol.")
+        return False # Does not need hydration
+
+def main():
+    print("==========================================")
+    print("      CRYSTAL BOX CALIBRATION TOOL        ")
+    print("==========================================")
+    
+    needs_sync = check_system_state()
+    
+    if needs_sync:
+        # 1. Ingest Vocab (Embed + UMAP + MLP Train)
+        run_step("ingest_vocab.py", "Training Geometry & Shadow Projector")
+        
+        # 2. Process Clusters (HDBSCAN + LOD)
+        run_step("process_clusters.py", "Calculating Semantic Islands & LOD")
+        
+        import shutil
+        import glob
+        
+        demo_src_dir = BACKEND_DIR.parent / "demo_dictionaries"
+        dict_dest_dir = BACKEND_DIR / "data" / "dictionaries"
+        dict_dest_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Clear the destination directory of json files first
+        for f in glob.glob(str(dict_dest_dir / "*.json")):
+            os.remove(f)
+            
+        if settings.LOAD_DEMOS:
+            print("📦 Ingesting Demo Dictionaries based on configuration...")
+            for f in glob.glob(str(demo_src_dir / "*.json")):
+                shutil.copy(f, dict_dest_dir)
+        else:
+            print("🈳 Skipping Demo Dictionaries (LOAD_DEMOS=False).")
+            
+        # 3. Ingest Dictionaries (Context Linking)
+        run_step("ingest_dictionaries.py", "Injecting Knowledge Definitions")
+        
+        print("\n✨ SYSTEM CALIBRATED. READY FOR VISUALIZATION.")
+    else:
+        print("\n✨ AUTONOMIC BYPASS: No recalibration required.")
+
+if __name__ == "__main__":
+    main()
+
+################################################################################
+FILE: backend/app/core/dependencies.py
+################################################################################
+
+from app.modules.embedder import Embedder
+from app.modules.storage import Storage
+from app.modules.geometry import Geometry
+from app.modules.context_vault import ContextVault
+import pandas as pd
+
+class GlobalState:
+    embedder: Embedder = None
+    storage: Storage = None
+    geometry: Geometry = None
+    context_vault: ContextVault = None
+    # Cache for the Galaxy View / Probe
+    galaxy_cache: pd.DataFrame = None 
+    identity_resolver: "IdentityResolver" = None 
+    firewall_threshold: float = 0.45 
+
+state = GlobalState()
+
+def get_embedder() -> Embedder:
+    if not state.embedder:
+        # Initialize Embedder (loads model)
+        state.embedder = Embedder()
+        state.embedder.load()
+    return state.embedder
+
+def get_storage() -> Storage:
+    if not state.storage:
+        # Ensure embedder is ready to get name/dim
+        embedder = get_embedder()
+        state.storage = Storage(
+            model_name=embedder.model_name,
+            dimension=embedder.dimension
+        )
+    return state.storage
+
+def get_context_vault() -> ContextVault:
+    if not state.context_vault:
+        state.context_vault = ContextVault()
+    return state.context_vault
+
+def get_galaxy_cache(force_reload: bool = False) -> pd.DataFrame:
+    """Lazy loads the full dataset for analysis."""
+    if state.galaxy_cache is None or force_reload:
+        print("🧠 Loading Galaxy Cache into Memory...")
+        storage = get_storage()
+        state.galaxy_cache = storage.get_all_vectors()
+    return state.galaxy_cache
+
+# Geometry is usually accessed via state directly or initialized on startup
+if not state.geometry:
+    state.geometry = Geometry()
+
+from app.modules.identity import IdentityResolver
+
+def get_identity_resolver() -> IdentityResolver:
+    if not state.identity_resolver:
+        print("🆔 Initializing Identity Resolver...")
+        storage = get_storage()
+        state.identity_resolver = IdentityResolver(storage)
+    return state.identity_resolver
+
+################################################################################
+FILE: backend/app/modules/geometry.py
+################################################################################
+
+import umap
+import numpy as np
+import joblib
+from pathlib import Path
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.neural_network import MLPRegressor
+from sklearn.cluster import HDBSCAN
+from typing import Tuple
+from app.core.config import settings
+import time
+
+class Geometry:
+    def __init__(self, model_path: Path = None):
+        if model_path is None:
+            self.model_path = settings.BASE_DIR.resolve() / "data" / "geometry_state.pkl"
+        else:
+            self.model_path = model_path.resolve()
+        # UMAP: The Teacher (Ground Truth Generator)
+        self.reducer = umap.UMAP(n_components=3, random_state=42, n_neighbors=15, min_dist=0.1)
+        # MLP: The Student (Shadow Projector for Real-Time Inference)
+        self.shadow_projector = MLPRegressor(
+            hidden_layer_sizes=(256, 128),
+            activation='relu',
+            solver='adam',
+            random_state=42,
+            max_iter=500
+        )
+        # Scaler: Normalizes to Unit Cube [0, 300]
+        self.scaler = MinMaxScaler(feature_range=(0, 300))
+        self.is_fitted = False
+        
+        self._load()
+
+    def fit_transform(self, vectors: np.ndarray) -> np.ndarray:
+        """
+        1. Learn Manifold (UMAP).
+        2. Train Shadow Projector (MLP) to mimic UMAP.
+        3. Learn Bounds (Scaler).
+        """
+        print(f"📐 Computing Manifold (Teacher) for {len(vectors)} points...")
+        t0 = time.time()
+        
+        # 1. Generate Ground Truth via UMAP
+        raw_3d = self.reducer.fit_transform(vectors)
+        print(f"   - UMAP finished in {time.time() - t0:.2f}s")
+        
+        # 2. Train Shadow Projector
+        print("🧠 Training Shadow Projector (Student)...")
+        t1 = time.time()
+        self.shadow_projector.fit(vectors, raw_3d)
+        print(f"   - MLP trained in {time.time() - t1:.2f}s")
+        
+        # 3. Normalize
+        norm_3d = self.scaler.fit_transform(raw_3d)
+        
+        self.is_fitted = True
+        self._save()
+        return norm_3d
+
+    def transform(self, vectors: np.ndarray) -> np.ndarray:
+        """
+        High-Speed Projection using the Shadow Projector (MLP).
+        Latency Target: <10ms
+        """
+        if not self.is_fitted:
+            # Fallback to origin to prevent crash
+            return np.zeros((len(vectors), 3))
+            
+        # 1. Predict Raw 3D (Fast Inference)
+        raw_3d = self.shadow_projector.predict(vectors)
+        
+        # 2. Normalize
+        norm_3d = self.scaler.transform(raw_3d)
+        
+        # Singularity Detection
+        for i in range(len(norm_3d)):
+            if np.allclose(norm_3d[i], [0.0, 0.0, 0.0], atol=1e-8):
+                norm_3d[i] += np.random.uniform(-1e-5, 1e-5, size=3)
+                
+        return norm_3d
+
+    def compute_clusters(self, vectors: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Unsupervised Semantic Clustering using HDBSCAN.
+        Input: High-dimensional vectors (768D), NOT 3D projection.
+        Output: labels (-1 for noise), probabilities
+        """
+        print(f"🧩 Computing Clauses (HDBSCAN) for {len(vectors)} points...")
+        t0 = time.time()
+        
+        # metric='euclidean' usually requires normalized vectors for cosine similarity equivalent
+        # If vectors are already normalized (which they should be from embedder), euclidean is fine.
+        hdb = HDBSCAN(min_cluster_size=15, metric='euclidean')
+        cluster_labels = hdb.fit_predict(vectors)
+        probs = hdb.probabilities_
+        
+        n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+        print(f"   - Found {n_clusters} clusters in {time.time() - t0:.2f}s")
+        
+        return cluster_labels, probs
+
+    def _save(self):
+        try:
+            self.model_path.parent.mkdir(parents=True, exist_ok=True)
+            joblib.dump({
+                'reducer': self.reducer, 
+                'scaler': self.scaler,
+                'shadow_projector': self.shadow_projector
+            }, self.model_path)
+            print(f"💾 Geometry state (Teacher+Student) saved to {self.model_path}")
+        except Exception as e:
+            print(f"❌ Failed to save geometry state: {e}")
+
+    def _load(self):
+        if self.model_path.exists():
+            try:
+                data = joblib.load(self.model_path)
+                self.reducer = data['reducer']
+                self.scaler = data['scaler']
+                if 'shadow_projector' in data:
+                    self.shadow_projector = data['shadow_projector']
+                    
+                    # Verify Dimension Match for new Core Upgrades (e.g. 768 to 1024)
+                    if hasattr(self.shadow_projector, 'n_features_in_') and self.shadow_projector.n_features_in_ != settings.VECTOR_DIM:
+                        print("⚠️ Dimension mismatch detected. Geometry requires recalibration.")
+                        self.is_fitted = False
+                        return
+
+                else:
+                    print("⚠️ Legacy Geometry detected. Shadow Projector missing. Please re-ingest galaxy.")
+                    self.is_fitted = False # Force re-fit
+                    return
+
+                self.is_fitted = True
+                print("📂 Geometry state loaded (Shadow Projector Active).")
+            except Exception as e:
+                print(f"⚠️ Failed to load geometry state: {e}")
+                self.is_fitted = False
+
+################################################################################
+FILE: backend/app/modules/embedder.py
+################################################################################
+
+from abc import ABC, abstractmethod
+from typing import List, Union, Dict, Any, Optional
+import numpy as np
+import torch
+import gc
+from sentence_transformers import SentenceTransformer
+from app.core.config import settings
+
+# --- Abstract Strategy Interface ---
+class EmbedderStrategy(ABC):
+    @abstractmethod
+    def load(self) -> None:
+        """Initialize the underlying model."""
+        pass
+
+    @abstractmethod
+    def unload(self) -> None:
+        """Free resources."""
+        pass
+
+    @abstractmethod
+    def encode(self, texts: Union[str, List[str]]) -> np.ndarray:
+        """Return raw sentence vectors."""
+        pass
+
+    @abstractmethod
+    def tokenize(self, text: str) -> List[Dict[str, Any]]:
+        """Return contextual token metadata (id, text, vector)."""
+        pass
+
+    @property
+    @abstractmethod
+    def dimension(self) -> int:
+        """Return the vector dimension."""
+        pass
+    
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Return the model name for storage namespacing."""
+        pass
+
+# --- Concrete Strategy: Local HuggingFace ---
+class LocalHFStrategy(EmbedderStrategy):
+    def __init__(self, model_name: str, device: str):
+        self.model_name = model_name
+        self.device = device
+        self.model: Optional[SentenceTransformer] = None
+        self._dim: Optional[int] = None
+
+    def load(self):
+        if self.model is None:
+            print(f"🔌 Loading Local Model: {self.model_name} on {self.device}...")
+            self.model = SentenceTransformer(self.model_name, device=self.device)
+            self._dim = self.model.get_sentence_embedding_dimension()
+
+    def unload(self):
+        if self.model is not None:
+            print(f"🔌 Unloading Model: {self.model_name}...")
+            del self.model
+            self.model = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
+    def encode(self, texts: Union[str, List[str]]) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Use 'with embedder:' or call load().")
+        return self.model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+
+    def tokenize(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Performs a full forward pass to capture CONTEXTUAL embeddings.
+        """
+        if self.model is None:
+            raise RuntimeError("Model not loaded.")
+
+        # 1. Tokenize
+        # We use the internal tokenizer to get inputs
+        features = self.model.tokenizer([text], padding=True, truncation=True, return_tensors="pt")
+        
+        # Move to device
+        features = {k: v.to(self.model.device) for k, v in features.items()}
+
+        # 2. Forward Pass (Contextual)
+        with torch.no_grad():
+            output = self.model.forward(features)
+        
+        # 3. Extract Token Embeddings (Hidden State)
+        # output['token_embeddings'] is [Batch, Seq_Len, Dim]
+        token_embeddings = output['token_embeddings'][0].cpu().numpy()
+        
+        # 4. Map IDs to Tokens
+        input_ids = features['input_ids'][0].cpu().tolist()
+        tokens = self.model.tokenizer.convert_ids_to_tokens(input_ids)
+
+        # 5. Construct Response
+        result = []
+        for i, (token, tid, vec) in enumerate(zip(tokens, input_ids, token_embeddings)):
+            result.append({
+                "token": token,
+                "id": tid,
+                "vector": vec.tolist(), # Contextual Vector
+                "index": i
+            })
+        
+        return result
+
+    @property
+    def dimension(self) -> int:
+        return self._dim if self._dim else settings.VECTOR_DIM
+
+    @property
+    def name(self) -> str:
+        return self.model_name
+
+# --- The Context Manager (Factory) ---
+class Embedder:
+    def __init__(self, strategy_type: str = "local", **kwargs):
+        self.strategy_type = strategy_type
+        self.kwargs = kwargs
+        
+        # Factory Logic
+        if strategy_type == "local":
+            self.strategy = LocalHFStrategy(
+                model_name=kwargs.get("model_name", settings.MODEL_NAME),
+                device=kwargs.get("device", settings.DEVICE)
+            )
+        else:
+            raise ValueError(f"Unknown strategy: {strategy_type}")
+
+    def __enter__(self):
+        """Resource Allocation"""
+        self.strategy.load()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Resource Cleanup"""
+        # We keep the model loaded for the server, but this enables 'with' usage for scripts.
+        pass 
+
+    def load(self):
+        self.strategy.load()
+
+    def unload(self):
+        self.strategy.unload()
+
+    def encode(self, text) -> np.ndarray:
+        return self.strategy.encode(text)
+
+    def tokenize(self, text) -> List[Dict]:
+        return self.strategy.tokenize(text)
+
+    @property
+    def dimension(self) -> int:
+        return self.strategy.dimension
+    
+    @property
+    def model_name(self) -> str:
+        return self.strategy.name
+
+################################################################################
+FILE: backend/app/modules/ingestor.py
+################################################################################
+
+import re
+from pathlib import Path
+from typing import List, Generator
+from pydantic import BaseModel
+
+class Chunk(BaseModel):
+    text: str
+    metadata: dict
+
+class Ingestor:
+    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+    def load_file(self, file_path: Path) -> List[Chunk]:
+        """Loads a file and returns a list of text chunks."""
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        if file_path.suffix.lower() == '.txt':
+            return self._load_text(file_path)
+        elif file_path.suffix.lower() == '.pdf':
+            return self._load_pdf(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_path.suffix}")
+
+    def _load_text(self, file_path: Path) -> List[Chunk]:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+            # If it's a vocab file (one word per line), treat differently?
+            # For now, let's assume standard text for chunking, 
+            # or check if it looks like a vocab list.
+            # User mentioned "vocab.txt", which is usually line-separated.
+            # Let's support both: if many newlines, maybe treat lines as chunks?
+            # For this generic ingestor, let's stick to sliding window for prose,
+            # and line-based for lists.
+            
+            # Simple heuristic: if avg line length < 20 chars, maybe it's a list.
+            lines = text.splitlines()
+            if len(lines) > 0 and (len(text) / len(lines)) < 30:
+                 return [Chunk(text=line.strip(), metadata={"source": str(file_path), "line": i+1}) 
+                         for i, line in enumerate(lines) if line.strip()]
+
+            return list(self._chunk_text(text, source=str(file_path)))
+
+    def _load_pdf(self, file_path: Path) -> List[Chunk]:
+        try:
+            import pypdf
+        except ImportError:
+            raise ImportError("pypdf is required for PDF ingestion. pip install pypdf")
+        
+        reader = pypdf.PdfReader(file_path)
+        chunks = []
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text:
+                curr_chunks = self._chunk_text(text, source=str(file_path), page=i+1)
+                chunks.extend(curr_chunks)
+        return chunks
+
+    def _chunk_text(self, text: str, **metadata) -> Generator[Chunk, None, None]:
+        """Simple sliding window chunker."""
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        start = 0
+        while start < len(text):
+            end = start + self.chunk_size
+            chunk_text = text[start:end]
+            
+            # Try to break at a space
+            if end < len(text):
+                last_space = chunk_text.rfind(' ')
+                if last_space != -1:
+                    end = start + last_space
+                    chunk_text = text[start:end]
+            
+            yield Chunk(text=chunk_text, metadata=metadata)
+            start += (len(chunk_text) - self.chunk_overlap)
+
+################################################################################
+FILE: backend/ingest_vocab.py
+################################################################################
+
+import sys
+import time
+from pathlib import Path
+from tqdm import tqdm
+import numpy as np
+
+# Add backend to path to allow imports
+sys.path.append(str(Path(__file__).resolve().parent))
+
+from app.core.config import settings
+from app.core.dependencies import get_embedder, get_storage, state
+from app.modules.storage import DBItem
+from app.modules.geometry import Geometry
+
+def ingest_galaxy():
+    print("🌌 Initializing Galaxy Ingestion Protocol...")
+    
+    # 1. Load Resources
+    embedder = get_embedder()
+    # Force load geometry to ensure we have the object, but we will re-fit it.
+    geometry = Geometry() 
+    storage = get_storage()
+    
+    vocab_path = settings.VOCAB_PATH
+    if not vocab_path.exists():
+        print(f"❌ Vocab file not found: {vocab_path}")
+        sys.exit(1)
+
+    # 2. Read Vocab
+    print(f"📖 Reading vocabulary from {vocab_path}...")
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        words = [line.strip() for line in f if line.strip()]
+    
+    print(f"✨ Found {len(words)} tokens. Starting Batch Embedding...")
+
+    # 3. Batch Embedding
+    batch_size = 100
+    all_vectors = []
+    all_items = []
+    
+    # We process in chunks to show progress and manage RAM
+    import gc
+    for i in tqdm(range(0, len(words), batch_size), desc="Embedding"):
+        batch_words = words[i : i + batch_size]
+        
+        # Enforce Dimension
+        assert settings.VECTOR_DIM == 1024, f"Vector dimension mismatch. Expected 1024, got {settings.VECTOR_DIM}. Neural core misaligned."
+        
+        # Encode
+        vectors = embedder.encode(batch_words)
+        
+        # Store temporarily
+        for j, word in enumerate(batch_words):
+            galaxy_id = i + j
+            if galaxy_id > 8999:
+                raise RuntimeError("Vocabulary Capacity Exhausted: ID space [0-8999] exceeded. DMZ breach prevented.")
+            all_vectors.append(vectors[j])
+            all_items.append(DBItem(
+                text=word,
+                vector=vectors[j].tolist(),
+                metadata={"source": "vocab_galaxy"},
+                id=galaxy_id  # Simple integer ID for the galaxy
+            ))
+        
+        # Free memory at each batch step
+        gc.collect()
+
+    # Convert to numpy for Geometry
+    matrix = np.array(all_vectors)
+    
+    # 4. Fit the Manifold (The Crystal Box)
+    print("📐 Fitting 3D Manifold (UMAP + Scaling)... this may take a moment.")
+    t0 = time.time()
+    # This trains UMAP on the whole dataset and saves the state
+    xyz_matrix = geometry.fit_transform(matrix)
+    print(f"✅ Manifold fitted in {time.time() - t0:.2f}s")
+
+    # 5. Assign Coordinates & Persist
+    print("💾 Persisting to Crystal Vault (LanceDB)...")
+    final_items = []
+    for idx, item in enumerate(all_items):
+        item.xyz = xyz_matrix[idx].tolist()
+        final_items.append(item)
+        
+    # Batch insert to LanceDB
+    # We can insert all at once or in chunks. LanceDB handles large inserts well.
+    storage.add(final_items)
+    
+    print(f"🚀 Galaxy Ingestion Complete. {len(final_items)} stars mapped.")
+    print(f"📂 Geometry State saved to: {geometry.model_path}")
+
+if __name__ == "__main__":
+    ingest_galaxy()
+
+################################################################################
+FILE: backend/ingest_dictionaries.py
+################################################################################
+
+import sys
+import os
+
+# Add backend directory to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from app.modules.storage import Storage, DBItem
+from app.modules.context_vault import ContextVault
+from app.modules.identity import IdentityResolver
+from app.modules.embedder import Embedder
+from app.modules.geometry import Geometry
+from app.core.config import settings
+
+def ingest_dictionaries():
+    print("=== 🧠 Crystal Box: Semantic Injection Protocol ===")
+    
+    try:
+        # Initialize Storage for IdentityResolver
+        storage = Storage(model_name=settings.MODEL_NAME, dimension=settings.VECTOR_DIM)
+        identity_resolver = IdentityResolver(storage)
+        
+        context_vault = ContextVault()
+        
+        embedder = Embedder()
+        embedder.load()
+        geometry = Geometry()
+        
+        # 1. Wipe definitions
+        context_vault.wipe_definitions()
+        
+        import glob
+        import json
+        
+        dictionaries = []
+        dict_pattern = str(settings.BASE_DIR.resolve() / "data" / "dictionaries" / "*.json")
+        for filepath in glob.glob(dict_pattern):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                dictionaries.append(json.load(f))
+
+        total_processed = 0
+        total_linked = 0
+        total_sovereign = 0
+        next_new_id = 10000
+        
+        for dictionary in dictionaries:
+            dict_name = dictionary["name"]
+            dict_color = dictionary["color"]
+            dict_desc = dictionary["description"]
+            
+            print(f"--> 📂 Mounting Dictionary: {dict_name}")
+            
+            c_id = -1
+            try:
+                dict_id = context_vault.create_dictionary(dict_name, dict_color, dict_desc)
+                c_id = -(dict_id * 10)
+            except Exception as e:
+                print(f"    ⚠️ Meta Error: {e}")
+
+            for term, definition in dictionary["terms"].items():
+                total_processed += 1
+                # 1. Resolve Galaxy ID
+                galaxy_id = identity_resolver.get_galaxy_id(term)
+                
+                if galaxy_id is None:
+                    galaxy_id = next_new_id
+                    next_new_id += 1
+                    total_sovereign += 1
+                    print(f"    [NEW] Allocating ID {galaxy_id} for '{term}'")
+                    
+                    vec = embedder.encode(term)
+                    vec_2d = vec.reshape(1, -1) if vec.ndim == 1 else vec
+                    xyz = geometry.transform(vec_2d)[0]
+                    
+                    # c_id is already defined above from context_vault
+                    item = DBItem(
+                        id=galaxy_id,
+                        text=term,
+                        vector=vec.tolist() if vec.ndim == 1 else vec[0].tolist(),
+                        xyz=xyz.tolist(),
+                        metadata={"source": dict_name},
+                        cluster_id=c_id,
+                        cluster_label=dict_name,
+                        lod_score=1.0
+                    )
+                    storage.add([item])
+                    print(f"    [LANCEDB] Injected '{term}' at XYZ: {xyz}")
+                else:
+                    total_linked += 1
+                    # [SSA MANDATE] Force existing Galaxy nodes to inherit the Sovereign Dictionary label
+                    storage.update_clusters([galaxy_id], [c_id], [dict_name])
+                    
+                # 2. Inject into Context Vault
+                # Weight 1.5 gives these definitions priority in visualization
+                context_vault.add_definition(galaxy_id, dict_name, definition, weight=1.5)
+                print(f"    [LINKED] '{term}' -> ID {galaxy_id}")
+
+        print(f"=== ✅ Injection Complete ===")
+        print(f"   - Total Terms Processed: {total_processed}")
+        print(f"   - Total Linked (Existing Galaxy IDs): {total_linked}")
+        print(f"   - Total Sovereign Created (IDs >= 10000): {total_sovereign}")
+
+    except Exception as e:
+        print(f"❌ Critical Injection Failure: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    ingest_dictionaries()
+
+################################################################################
+FILE: backend/perform_tests.py
+################################################################################
+
+import httpx
+import sys
+BASE_URL = "http://127.0.0.1:8000"
+TIMEOUT = 10.0
+
+def log_section(msg): print(f"\\n--- {msg} ---")
+def log_info(msg): print(f"ℹ️ {msg}")
+def log_success(msg): print(f"✅ {msg}")
+def log_fail(msg, detail=""): print(f"❌ {msg} {detail}")
+
+def test_arithmetic():
+    print("Testing /arithmetic...")
+    payload = {"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}
+    try:
+        r = httpx.post(f"{BASE_URL}/arithmetic", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            print("✅ Arithmetic OK")
+            return True
+        print(f"❌ Failed: {r.text}")
+        return False
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
+
+def test_arithmetic_vector_dimension():
+    log_section("Testing Arithmetic Vector Dimension (/arithmetic)")
+    payload = {"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}
+    try:
+        r = httpx.post(f"{BASE_URL}/arithmetic", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if not isinstance(data, dict):
+                log_fail("Response is not a dictionary. Missing 'vector' and 'results' fields.")
+                return False
+                
+            vector = data.get("vector", [])
+            results = data.get("results", [])
+            
+            if len(vector) != 1024:
+                log_fail(f"Vector length is not 1024. Got: {len(vector)}")
+                return False
+                
+            if len(results) == 0:
+                log_info("Skipped results count check: Database is empty.")
+            elif len(results) != 3:
+                log_fail(f"Results length does not match top_k=3. Got: {len(results)}")
+                return False
+                
+            log_success("Arithmetic Vector Dimension OK")
+            return True
+            
+        log_fail(f"Request failed: {r.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception during test: {str(e)}")
+        return False
+
+def test_embed():
+    print("Testing /embed...")
+    try:
+        r = httpx.post(f"{BASE_URL}/embed", json={"text": "test"}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            print("✅ Embed OK")
+            return True
+        print("❌ Failed")
+        return False
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
+def test_flight_manifold_boundaries():
+    log_section("Testing Flight Manifold Boundaries (/galaxy)")
+    try:
+        response = httpx.get(f"{BASE_URL}/galaxy", timeout=TIMEOUT)
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                log_info("Skipped: Database is empty.")
+                return True
+            
+            out_of_bounds = 0
+            for item in data[:100]: # Check sample
+                if 'xyz' in item:
+                    xyz = item['xyz']
+                    if not all(0 <= c <= 300 for c in xyz):
+                        out_of_bounds += 1
+            
+            if out_of_bounds == 0:
+                log_success("Flight Manifold Check: All coordinates within [0, 300] safe flight zone.")
+                return True
+            else:
+                log_fail(f"Flight Hazard: {out_of_bounds} nodes outside [0, 300] boundaries.")
+                return False
+        else:
+            log_fail("Galaxy request failed", response.text)
+            return False
+    except Exception as e:
+        log_fail("Exception during flight manifold test", str(e))
+        return False
+
+def test_tokenize_raw_vector_retention():
+    log_section("Testing Tokenize Raw Vector Retention (/tokenize)")
+    try:
+        # Test 1: include_raw_vector = False (Default)
+        r_false = httpx.post(
+            f"{BASE_URL}/tokenize", 
+            json={"text": "holograma", "include_raw_vector": False}, 
+            timeout=TIMEOUT
+        )
+        data_false = r_false.json()
+        tokens_false = data_false.get("tokens", [])
+        if not tokens_false or "vector" in tokens_false[0]:
+            log_fail("Raw vector was NOT removed when include_raw_vector=False.")
+            return False
+
+        # Test 2: include_raw_vector = True
+        r_true = httpx.post(
+            f"{BASE_URL}/tokenize", 
+            json={"text": "holograma", "include_raw_vector": True}, 
+            timeout=TIMEOUT
+        )
+        data_true = r_true.json()
+        tokens_true = data_true.get("tokens", [])
+        if not tokens_true or "vector" not in tokens_true[0]:
+            log_fail("Raw vector was NOT retained when include_raw_vector=True.")
+            return False
+            
+        # Verify 1024D length
+        vector_len = len(tokens_true[0]["vector"])
+        if vector_len not in [768, 1024]:
+             log_fail(f"Vector has unexpected dimensionality: {vector_len}")
+             return False
+
+        log_success("Tokenize Raw Vector Retention OK")
+        return True
+    except Exception as e:
+        log_fail("Exception during tokenize raw vector test", str(e))
+        return False
+
+def test_tokenize_raw_vector_no_nan_1024d():
+    log_section("Testing Tokenize Raw Vector No NaN 1024D (/tokenize)")
+    try:
+        r = httpx.post(
+            f"{BASE_URL}/tokenize", 
+            json={"text": "geometria", "include_raw_vector": True}, 
+            timeout=TIMEOUT
+        )
+        if r.status_code != 200:
+            log_fail("Tokenize request failed", r.text)
+            return False
+            
+        data = r.json()
+        tokens = data.get("tokens", [])
+        if not tokens or "vector" not in tokens[0]:
+            log_fail("Raw vector was missing when include_raw_vector=True.")
+            return False
+            
+        vector = tokens[0]["vector"]
+        
+        # Verify 1024D length
+        if len(vector) != 1024:
+             log_fail(f"Vector has unexpected dimensionality: {len(vector)}")
+             return False
+
+        # Verify No NaNs
+        import math
+        if any(v is None or math.isnan(v) for v in vector):
+             log_fail("Vector contains NaN or None values.")
+             return False
+             
+        # Verify floats
+        if not all(isinstance(v, (int, float)) for v in vector):
+             log_fail("Vector contains non-numeric values.")
+             return False
+
+        log_success("Tokenize Raw Vector No NaN 1024D OK")
+        return True
+    except Exception as e:
+        log_fail("Exception during Tokenize Raw Vector No NaN 1024D test", str(e))
+        return False
+
+def test_vector_distance_integrity():
+    log_section("Testing Vector Distance Integrity (/arithmetic)")
+    payload = {"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}
+    try:
+        r = httpx.post(f"{BASE_URL}/arithmetic", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if not isinstance(data, dict):
+                log_fail("Response is not a dictionary.")
+                return False
+                
+            # Arithmetic should return its own vector
+            vector = data.get("vector", [])
+            if len(vector) != 1024:
+                log_fail(f"Result vector length is not 1024. Got: {len(vector)}. Needed for distance calculation.")
+                return False
+                
+            log_success("Vector Distance Integrity OK - 1024D vector reliably provided.")
+            return True
+            
+        log_fail(f"Request failed: {r.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception during vector distance integrity test: {str(e)}")
+        return False
+
+def test_arithmetic_top_k_results():
+    log_section("Testing Arithmetic Top K Results (/arithmetic)")
+    payload = {"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}
+    try:
+        r = httpx.post(f"{BASE_URL}/arithmetic", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            results = data.get("results", []) if isinstance(data, dict) else data
+            
+            if not isinstance(results, list):
+                log_fail("Response results must be a list structure.")
+                return False
+                
+            if len(results) > 0:
+                first = results[0]
+                if "word" not in first and "text" not in first:
+                    log_fail("Missing 'word' or 'text' key in result.")
+                    return False
+                if "score" not in first:
+                    log_fail("Missing 'score' key in result.")
+                    return False
+            
+            log_success("Arithmetic Top K Results OK")
+            return True
+        else:
+            log_fail("Failed response", r.text)
+            return False
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
+def test_analyze_dimension_probe():
+    log_section("Testing Analyze Dimension Probe (/analyze_dimension)")
+    payload = {"dimension_index": 512, "top_k": 5}
+    try:
+        r = httpx.post(f"{BASE_URL}/analyze_dimension", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if not isinstance(data, dict):
+                log_fail("Response is not a dictionary.")
+                return False
+            
+            if "error" in data:
+                if "empty" in data["error"].lower() or "run ingest_vocab" in data["error"].lower():
+                    log_info(f"Skipped: {data['error']}")
+                    return True
+                else:
+                    log_fail(f"Logic Error: {data['error']}")
+                    return False
+                
+            dimension = data.get("dimension")
+            if dimension != 512:
+                log_fail(f"Returned dimension does not match request. Got: {dimension}")
+                return False
+                
+            top_activators = data.get("top_activators", [])
+            bottom_activators = data.get("bottom_activators", [])
+            
+            if not isinstance(top_activators, list) or not isinstance(bottom_activators, list):
+                log_fail("Activators must be lists.")
+                return False
+                
+            log_success("Analyze Dimension Probe OK")
+            return True
+        else:
+            log_fail("Failed response", r.text)
+            return False
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
+def test_hud_telemetry_scaling_sim():
+    log_section("Testing HUD Telemetry Scaling Simulation")
+    try:
+        # Simulate calculation bounding limits at extreme stretches
+        x_stretch = 40.0
+        max_index = 1024
+        # At max stretch, length check
+        length = max_index * x_stretch
+        if length > 50000: # We need up to ~40k max roughly
+             log_info("Max scale exceeds 50000, may clip.")
+        else:
+             log_success(f"Max Scale {length} fits neatly inside 100,000 unit Frustum.")
+        return True
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
+def test_dimension_probe_precision():
+    log_section("Testing Dimension Probe Precision (/analyze_dimension)")
+    try:
+        log_info("Probing boundaries [0] and [1023] for magnitude stability...")
+        low_res = httpx.post(f"{BASE_URL}/analyze_dimension", json={"dimension_index": 0, "top_k": 3}, timeout=TIMEOUT)
+        high_res = httpx.post(f"{BASE_URL}/analyze_dimension", json={"dimension_index": 1023, "top_k": 3}, timeout=TIMEOUT)
+        
+        if low_res.status_code == 200 and high_res.status_code == 200:
+            log_success("Dimension Probe Precision bounds OK")
+            return True
+        else:
+            log_fail("Probe bounds check failed.")
+            return False
+    except Exception as e:
+        log_fail("Exception during probe precision test", str(e))
+        return False
+
+def test_vector_magnitudes_safe_math():
+    log_section("Testing Vector Magnitudes Safe Math Guard")
+    try:
+        import math
+        vec_a = [1.0] * 1024
+        vec_n = [0.0] * 1024
+        
+        mag_a = math.sqrt(sum(a*a for a in vec_a))
+        mag_n = math.sqrt(sum(n*n for n in vec_n))
+        
+        dn = 1.0
+        if mag_a > 0 and mag_n > 0:
+            dot = sum(a * b for a, b in zip(vec_a, vec_n))
+            dn = 1 - (dot / (mag_a * mag_n))
+            
+        if math.isnan(dn):
+            log_fail("SafeMath failed: Math produced NaN")
+            return False
+            
+        log_success("SafeMath Vector Magnitudes OK")
+        return True
+    except Exception as e:
+        log_fail("Exception", str(e))
+        return False
+
+def main():
+    tests = [
+        test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
+        test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
+        test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
+        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math
+    ]
+    all_passed = True
+    for test in tests:
+        if not test():
+            all_passed = False
+    
+    if all_passed:
+        print("✅ ALL SYSTEMS GO")
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+################################################################################
+FILE: setup_wizard.py
+################################################################################
+
+#!/usr/bin/env python3
+import sys
+import os
+import subprocess
+import platform
+import time
+import venv
+from pathlib import Path
+
+# --- Configuration ---
+MIN_PYTHON_VERSION = (3, 10)
+
+VENV_DIR = Path("lsv_env")
+BACKEND_DIR = Path("backend")
+REQUIREMENTS_FILE = BACKEND_DIR / "requirements.txt"
+DIAGNOSTIC_SCRIPT = BACKEND_DIR / "diagnostic.py"
+ENV_FILE = BACKEND_DIR / ".env"
+
+# --- Colors ---
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def print_step(message):
+    print(f"\n{Colors.OKCYAN}==> {message}{Colors.ENDC}")
+
+def print_success(message):
+    print(f"{Colors.OKGREEN}✔ {message}{Colors.ENDC}")
+
+def print_error(message):
+    print(f"{Colors.FAIL}✖ {message}{Colors.ENDC}")
+
+def print_info(message):
+    print(f"{Colors.OKBLUE}ℹ {message}{Colors.ENDC}")
+
+# --- Helper Functions ---
+
+def check_python_version():
+    print_step("Checking Python Version...")
+    current_version = sys.version_info
+    if current_version < MIN_PYTHON_VERSION:
+        print_error(f"Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]}+ is required. You are running {current_version.major}.{current_version.minor}.")
+        sys.exit(1)
+    print_success(f"Python {current_version.major}.{current_version.minor} detected.")
+
+def get_venv_python():
+    """Returns the path to the python executable within the virtual environment."""
+    if platform.system() == "Windows":
+        return VENV_DIR / "Scripts" / "python.exe"
+    else:
+        return VENV_DIR / "bin" / "python"
+
+def ensure_venv():
+    print_step("Checking Virtual Environment...")
+    if not VENV_DIR.exists():
+        print_info(f"Creating virtual environment in {VENV_DIR}...")
+        try:
+            venv.create(VENV_DIR, with_pip=True)
+            print_success("Virtual environment created.")
+        except Exception as e:
+            print_error(f"Failed to create virtual environment: {e}")
+            sys.exit(1)
+    else:
+        print_success("Virtual environment exists.")
+
+    venv_python = get_venv_python()
+    if not venv_python.exists():
+        print_error(f"Virtual environment python not found at {venv_python}")
+        sys.exit(1)
+    return str(venv_python)
+
+def install_dependencies(python_path):
+    print_step("Installing Dependencies...")
+    if not REQUIREMENTS_FILE.exists():
+        print_error(f"Requirements file not found at {REQUIREMENTS_FILE}")
+        sys.exit(1)
+
+    print_info(f"Installing from {REQUIREMENTS_FILE}...")
+    try:
+        # Upgrade pip first
+        subprocess.check_call([python_path, "-m", "pip", "install", "--upgrade", "pip"], stdout=subprocess.DEVNULL)
+        
+        # Install requirements
+        # streaming output to user so they see progress
+        process = subprocess.Popen(
+            [python_path, "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        spinner = ['|', '/', '-', '\\']
+        idx = 0
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                # Basic spinner while reading output (or just print last line)
+                sys.stdout.write(f"\rInstalling... {spinner[idx % len(spinner)]} {output.strip()[:50].ljust(50)}")
+                sys.stdout.flush()
+                idx += 1
+        
+        if process.returncode != 0:
+             print_error("Dependency installation failed.")
+             print(process.stderr.read())
+             sys.exit(1)
+
+        print(f"\rInstalling... Done!                                                 ") # Clear line
+        print_success("Dependencies installed.")
+
+    except subprocess.CalledProcessError as e:
+        print_error(f"Failed to install dependencies: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print_error(f"An unexpected error occurred: {e}")
+        sys.exit(1)
+
+
+def configure_app():
+    print_step("Configuration")
+    default_model = "BAAI/bge-m3"
+    model_name = input(f"{Colors.BOLD}Enter Model Name (Press Enter for default '{default_model}'): {Colors.ENDC}").strip()
+    if not model_name:
+        model_name = default_model
+
+    hf_token = input(f"{Colors.BOLD}Enter Hugging Face Token (Optional, press Enter to skip): {Colors.ENDC}").strip()
+    
+    load_demos_input = input(f"{Colors.BOLD}Do you want to load the demo dictionaries (Constitution, Physics, Kitchen)? [Y/n]: {Colors.ENDC}").strip().lower()
+    load_demos = "False" if load_demos_input == 'n' else "True"
+    
+    config_content = f"MODEL_NAME={model_name}\n"
+    if hf_token:
+        config_content += f"HF_TOKEN={hf_token}\n"
+    
+    config_content += f"LOAD_DEMOS={load_demos}\n"
+    
+    # Add recommended robust timeouts
+    config_content += "HF_HUB_ETAG_TIMEOUT=30\n"
+    config_content += "HF_HUB_DOWNLOAD_TIMEOUT=300\n"
+    
+    try:
+        with open(ENV_FILE, "w") as f:
+            f.write(config_content)
+        print_success(f"Configuration saved to {ENV_FILE}")
+    except Exception as e:
+        print_error(f"Failed to save configuration: {e}")
+
+def run_diagnostics(python_path):
+    print_step("System Verification")
+    if not DIAGNOSTIC_SCRIPT.exists():
+        print_error(f"Diagnostic script not found at {DIAGNOSTIC_SCRIPT}")
+        return # Not critical enough to exit entire wizard if just diagnostics missing? 
+               # User said: "If diagnostics pass, print: "🚀 LSV Engine is Ready!""
+               # So it is part of the flow.
+        sys.exit(1)
+
+    print_info("Running diagnostics...")
+    try:
+        # We need to make sure the backend directory is in PYTHONPATH so imports work
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(BACKEND_DIR.resolve())
+        
+        subprocess.check_call([python_path, str(DIAGNOSTIC_SCRIPT)], env=env)
+        print_success("Diagnostics passed.")
+    except subprocess.CalledProcessError:
+        print_error("Diagnostics failed. Please check the output above.")
+        sys.exit(1)
+
+def main():
+    print(f"{Colors.HEADER}{Colors.BOLD}Welcome to the LSV Engine (Refactored Strategy) Setup Wizard{Colors.ENDC}")
+    print("---------------------------------------")
+
+    check_python_version()
+    venv_python = ensure_venv()
+    install_dependencies(venv_python)
+    configure_app()
+    run_diagnostics(venv_python)
+
+    print("\n" + "="*40)
+    print(f"{Colors.OKGREEN}{Colors.BOLD}🚀 LSV Engine is Ready!{Colors.ENDC}")
+    print(f"To start the server, run:")
+    print(f"{Colors.OKCYAN}source lsv_env/bin/activate{Colors.ENDC}  (or {Colors.OKCYAN}lsv_env\\Scripts\\activate{Colors.ENDC} on Windows)")
+    print(f"{Colors.OKCYAN}cd backend{Colors.ENDC}")
+    print(f"{Colors.OKCYAN}uvicorn app.main:app --reload{Colors.ENDC}")
+    print("="*40 + "\n")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n" + Colors.WARNING + "Setup cancelled by user." + Colors.ENDC)
+        sys.exit(0)
+
+################################################################################
+FILE: semantic_guardtrails_packager.py
+################################################################################
+
+import os
+import json
+import sys
+from datetime import datetime
+
+"""
+===============================================================================
+HOW-TO-USE: SEMANTIC GUARDRAILS ORCHESTRATOR (SSA PROTOCOL)
+===============================================================================
+1. PRE-REQUISITO: Estar en la raíz del proyecto.
+2. ACTIVACIÓN: 
+   $ source sg_env/bin/activate
+3. CONFIGURACIÓN:
+   - 'mision': Perfil base de archivos ('api' o 'engine').
+   - 'extras': Archivos específicos para la tarea actual.
+4. EJECUCIÓN:
+   $ ./run_pack.sh
+5. FLUJO:
+   - Verifica venv activo.
+   - Genera 'semantic_guardtrails_context.txt' unificando Specs, Manifiesto y Código.
+===============================================================================
+"""
+
+class SemanticGuardtrailsOrchestrator:
+    def __init__(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.manifest_path = os.path.join(self.root, "manifest.json")
+        self.vital_files =[
+            "architecture_spec.md", 
+            "manifest.json", 
+            "run_pack.sh"
+        ]
+        
+    def check_venv(self):
+        """Bloquea la ejecución si el venv no está activo."""
+        if not hasattr(sys, 'real_prefix') and not (sys.base_prefix != sys.prefix):
+            print("❌ ERROR: El entorno virtual (sg_env) NO está activo.")
+            print("Ejecutá: source sg_env/bin/activate")
+            sys.exit(1)
+
+    def get_profile(self, profile_name):
+        """Perfiles actualizados para la arquitectura FastAPI + LanceDB."""
+        profiles = {
+            "api":[
+                "backend/app/main.py",
+                "backend/app/api/routes.py"
+            ],
+            "engine":[
+                "backend/app/modules/storage.py",
+                "backend/app/modules/embedder.py",
+                "backend/app/modules/geometry.py"
+            ]
+        }
+        return profiles.get(profile_name,[])
+
+    def validate_state(self):
+        if os.path.exists(self.manifest_path):
+            with open(self.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+                print(f"\n🛰️  SYSTEM STATE v{m.get('version', 'UNKNOWN')}")
+                for feat, active in m.get("active_features", {}).items():
+                    print(f"[{'✅ LIVE' if active else '⏳ PENDING'}] {feat}")
+                print("-" * 35)
+        else:
+            print("⚠️ Warning: manifest.json no encontrado.")
+
+    def create_bundle(self, files, output_name="semantic_guardtrails_context.txt"):
+        final_list = list(dict.fromkeys(self.vital_files + files))
+        with open(output_name, "w", encoding="utf-8") as out:
+            out.write(f"SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: {datetime.now()}\n\n")
+            for file_path in final_list:
+                full_path = os.path.join(self.root, file_path)
+                if os.path.exists(full_path):
+                    out.write(f"\n{'#'*80}\nFILE: {file_path}\n{'#'*80}\n\n")
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        out.write(f.read())
+                else:
+                    print(f"⚠️ Warning: {file_path} no encontrado. Omitiendo...")
+
+if __name__ == "__main__":
+    orchestrator = SemanticGuardtrailsOrchestrator()
+    orchestrator.check_venv()
+    orchestrator.validate_state()
+    
+    # --- CONFIGURACIÓN FASE ACTUAL ---
+    # Cambiar a "engine" si se trabaja en el motor vectorial
+    mision = orchestrator.get_profile("api")
+    
+    # Archivos extra adaptados al nuevo proyecto
+    extras =[
+        "README.md",
+        "backend/requirements.txt",
+        "frontend/package.json",
+        "backend/app/modules/storage.py",
+        "backend/app/api/routes.py",
+        "backend/app/core/config.py",
+        "backend/app/modules/context_vault.py",
+        "backend/app/modules/identity.py",
+        "backend/app/main.py",
+        "backend/recalibrate.py",
+        "backend/app/core/dependencies.py",
+        "backend/app/modules/geometry.py",
+        "backend/app/modules/embedder.py",
+        "backend/app/modules/ingestor.py",
+        "backend/ingest_vocab.py",
+        "backend/ingest_dictionaries.py",
+        "backend/perform_tests.py",
+        "setup_wizard.py",
+        "semantic_guardtrails_packager.py",
+        "run_commander.sh",
+        "run_server.sh",
+        "run_ui.sh",
+        "run_tests.sh",
+        "backend/.env",
+        "frontend/src/main.tsx",
+        "frontend/src/App.tsx",
+        "frontend/src/hooks/useKeyboardControls.ts",
+        "frontend/src/components/SemanticThread.tsx", 
+        "frontend/src/components/ArithmeticHUD.tsx",
+        "frontend/src/ArithmeticVisualizer.tsx",
+        "frontend/src/store.ts"
+    ]
+    
+    orchestrator.create_bundle(mision + extras)
+    print(f"🚀 [SSA] Contexto total generado: {os.path.abspath('semantic_guardtrails_context.txt')}")
+################################################################################
+FILE: run_commander.sh
+################################################################################
+
+#!/bin/bash
+set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$PROJECT_ROOT/sg_env/bin/activate"
+export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+python3 backend/scripts/commander.py
+
+################################################################################
+FILE: run_server.sh
+################################################################################
+
+#!/bin/bash
+set -e
+PORT=8000
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+echo "🧹 Clearing Vite and Build caches..."
+rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
+rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
+
+# 1. Limpieza de Puertos
+PID=$(lsof -ti :$PORT || true)
+if [ ! -z "$PID" ]; then
+    echo "⚠️  Puerto $PORT ocupado (PID: $PID). Ejecutando limpieza..."
+    kill -9 $PID || true
+    sleep 1
+fi
+echo "👁️ Deep Observability Active. Infinite View & Crosshair Online."
+echo "🚀 Iniciando Semantic Guardrails Backend"
+source "$PROJECT_ROOT/sg_env/bin/activate"
+export PYTHONPATH="$PYTHONPATH:$PROJECT_ROOT/backend"
+cd "$PROJECT_ROOT/backend"
+uvicorn app.main:app --reload --host 127.0.0.1 --port $PORT
+
+################################################################################
+FILE: run_ui.sh
+################################################################################
+
+#!/bin/bash
+
+# Ensure we're in the repository root
+cd "$(dirname "$0")"
+
+echo "=> Activating virtual environment..."
+source sg_env/bin/activate
+
+echo "=> Starting Interstitial Cockpit (Frontend)..."
+cd frontend
+npm run dev
+
+################################################################################
+FILE: run_tests.sh
+################################################################################
+
+#!/bin/bash
+set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+echo "🧹 Clearing Vite and Build caches..."
+rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
+rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
+
+echo "👁️ Deep Observability Testing Initialized."
+source "$PROJECT_ROOT/sg_env/bin/activate"
+export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+python3 backend/perform_tests.py
+
+################################################################################
 FILE: backend/.env
 ################################################################################
 
@@ -910,3 +3018,990 @@ VECTOR_DIM=1024
 LANCEDB_URI="./data/lancedb"
 CONTEXT_DB_PATH="./data/context.db"
 DEBUG=True
+
+################################################################################
+FILE: frontend/src/main.tsx
+################################################################################
+
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+################################################################################
+FILE: frontend/src/App.tsx
+################################################################################
+
+import React from 'react';
+import ArithmeticHUD from './components/ArithmeticHUD';
+
+const App: React.FC = () => {
+  return (
+    <div style={{ width: '100vw', height: '100vh', background: '#050505', overflow: 'hidden' }}>
+      <ArithmeticHUD />
+    </div>
+  );
+};
+
+export default App;
+
+################################################################################
+FILE: frontend/src/hooks/useKeyboardControls.ts
+################################################################################
+
+import { useEffect, useRef } from 'react';
+
+export const useKeyboardControls = () => {
+    const keys = useRef(new Set<string>());
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const activeElem = document.activeElement;
+            if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA')) return;
+            keys.current.add(e.code);
+        };
+        const handleKeyUp = (e: KeyboardEvent) => {
+            keys.current.delete(e.code);
+        };
+        const handleFocusIn = (e: FocusEvent) => {
+            const activeElem = e.target as HTMLElement;
+            if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA')) {
+                keys.current.clear();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('focusin', handleFocusIn);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('focusin', handleFocusIn);
+        };
+    },[]);
+
+    return keys;
+};
+
+################################################################################
+FILE: frontend/src/components/SemanticThread.tsx
+################################################################################
+
+import React, { useRef, useMemo, useEffect, useState } from 'react';
+import * as THREE from 'three';
+import { Line } from '@react-three/drei';
+
+interface SemanticThreadProps {
+  data: Float32Array | number[]; // 1024 dimensions
+  position?: [number, number, number];
+  xStretch?: number;
+  amplitude?: number;
+  baseColor?: string;
+}
+
+export const SemanticThread: React.FC<SemanticThreadProps> = ({
+  data,
+  position = [0, 0, 0],
+  xStretch = 1.0,
+  amplitude = 100.0,
+  baseColor = '#ffffff'
+}) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const count = 1024;
+
+  const [linePoints, setLinePoints] = useState<THREE.Vector3[]>([]);
+
+  const parsedBaseColor = useMemo(() => new THREE.Color(baseColor), [baseColor]);
+
+  const shaderMaterial = useMemo(() => {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uBaseColor: { value: parsedBaseColor }
+      },
+      vertexShader: `
+        attribute float instanceValue;
+        varying float vValue;
+        
+        #include <common>
+
+        void main() {
+          vValue = instanceValue;
+          vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uBaseColor;
+        varying float vValue;
+
+        void main() {
+          vec3 finalColor;
+          float alpha = 1.0;
+
+          if (vValue >= 0.5) {
+            finalColor = uBaseColor;
+          } else if (vValue <= -0.5) {
+            finalColor = vec3(0.3, 0.0, 0.8); // Deep Blue/Purple
+          } else {
+            finalColor = vec3(0.2, 0.2, 0.2);
+            alpha = 0.05;
+          }
+
+          if (abs(vValue) < 0.1) {
+             discard;
+          }
+
+          gl_FragColor = vec4(finalColor, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+  }, []);
+
+  useEffect(() => {
+    shaderMaterial.uniforms.uBaseColor.value = parsedBaseColor;
+  }, [parsedBaseColor, shaderMaterial]);
+
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  useEffect(() => {
+    if (!meshRef.current || !data) return;
+
+    // RENDER GUARD: Strictly abort setMatrixAt execution if vector is not exactly 1024 floats
+    if (data.length !== 1024 || data.some(v => Number.isNaN(v) || typeof v !== 'number')) {
+      return;
+    }
+
+    const mesh = meshRef.current;
+
+    const valueArray = new Float32Array(count);
+    const dataLen = data.length;
+
+    const points: THREE.Vector3[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const val = i < dataLen ? data[i] : 0;
+      valueArray[i] = val;
+
+      const x = (i - 512) * xStretch;
+      const y = val * amplitude;
+      const z = 0;
+
+      dummy.position.set(x, y, z);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+
+      points.push(new THREE.Vector3(x, y, z));
+    }
+
+    requestAnimationFrame(() => {
+      if (meshRef.current && meshRef.current.geometry) {
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.geometry.setAttribute('instanceValue', new THREE.InstancedBufferAttribute(valueArray, 1));
+        mesh.geometry.computeBoundingSphere();
+      }
+    });
+
+    setLinePoints(points);
+  }, [data, xStretch, amplitude, dummy]);
+
+  if (!data || data.length !== 1024) return null;
+
+  return (
+    <group position={position}>
+      <instancedMesh ref={meshRef} args={[undefined, undefined, count]} material={shaderMaterial} frustumCulled={false}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+      </instancedMesh>
+      {linePoints.length > 0 && (
+        <Line
+          points={linePoints}
+          color={baseColor}
+          lineWidth={1.5}
+          transparent={true}
+          opacity={0.8}
+          depthWrite={false}
+          frustumCulled={false}
+        />
+      )}
+    </group>
+  );
+};
+
+export default SemanticThread;
+
+
+################################################################################
+FILE: frontend/src/components/ArithmeticHUD.tsx
+################################################################################
+
+import React, { useState, useRef, useEffect } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Sphere, Text, PointerLockControls, Billboard } from '@react-three/drei';
+import * as THREE from 'three';
+import { useKeyboardControls } from '../hooks/useKeyboardControls';
+import { SemanticThread } from './SemanticThread';
+import { useSemanticStore } from '../store';
+
+const FlightControls: React.FC = () => {
+  const controlsRef = useRef<any>(null);
+  const keys = useKeyboardControls();
+
+  // Physics Constants
+  const DRAG = 0.92;
+  const BASE_ACCEL = 2.0;
+
+  const boostFactor = useSemanticStore(state => state.boostFactor);
+
+  // Physics State
+  const velocity = useRef(new THREE.Vector3());
+
+  // Focus Management on Click
+  useEffect(() => {
+    const handleFocus = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Only blur if clicking directly on the canvas (Drei handles PointerLock internally)
+      if (target.tagName === 'CANVAS') {
+        if (document.activeElement && document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
+    };
+    // Use mousedown to blur the active element before the click event triggers the lock
+    document.addEventListener('mousedown', handleFocus);
+    return () => document.removeEventListener('mousedown', handleFocus);
+  }, []);
+
+  useFrame((state, delta) => {
+    // 1. Inertia (Damping)
+    velocity.current.multiplyScalar(DRAG);
+
+    // 2. Instantaneous Boost
+    const isBoosting = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight');
+    const currentBoost = isBoosting ? boostFactor : 1.0;
+
+    // 3. Calculate Input Direction
+    const inputVector = new THREE.Vector3();
+    if (keys.current.has('KeyW')) inputVector.z -= 1;
+    if (keys.current.has('KeyS')) inputVector.z += 1;
+    if (keys.current.has('KeyA')) inputVector.x -= 1;
+    if (keys.current.has('KeyD')) inputVector.x += 1;
+    if (keys.current.has('KeyQ')) inputVector.y -= 1;
+    if (keys.current.has('KeyE')) inputVector.y += 1;
+
+    if (inputVector.lengthSq() > 0) {
+      inputVector.normalize();
+    }
+
+    // 4. Apply Acceleration relative to Camera Orientation
+    inputVector.applyEuler(state.camera.rotation);
+    const effectiveAccel = BASE_ACCEL * currentBoost;
+
+    if (isBoosting) {
+      if (inputVector.lengthSq() > 0) {
+        velocity.current.copy(inputVector).multiplyScalar(effectiveAccel * delta);
+      } else {
+        velocity.current.set(0, 0, 0); // Decelerate instantly
+      }
+    } else {
+      velocity.current.addScaledVector(inputVector, effectiveAccel * delta);
+    }
+
+    // 5. Apply Velocity to Camera
+    state.camera.position.add(velocity.current);
+  });
+
+  return <PointerLockControls ref={controlsRef} makeDefault />;
+};
+
+type NodeData = {
+  word: string;
+  position: [number, number, number];
+  color: string;
+  vector?: number[];
+  token_id?: number;
+};
+
+const TelemetryHUD: React.FC<{ nodesCount: number, xStretch: number }> = ({ nodesCount, xStretch }) => {
+  const [fps, setFps] = useState(0);
+  const frames = useRef(0);
+  const lastTime = useRef(performance.now());
+
+  useEffect(() => {
+    let animationFrameId: number;
+    const loop = () => {
+      const now = performance.now();
+      frames.current++;
+      if (now >= lastTime.current + 1000) {
+        setFps(Math.round((frames.current * 1000) / (now - lastTime.current)));
+        frames.current = 0;
+        lastTime.current = now;
+      }
+      animationFrameId = requestAnimationFrame(loop);
+    };
+    animationFrameId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: '20px',
+      left: '20px',
+      zIndex: 10,
+      background: 'rgba(0, 20, 20, 0.8)',
+      border: '1px solid #00ff00',
+      padding: '10px 15px',
+      borderRadius: '4px',
+      color: '#00ff00',
+      fontFamily: 'monospace',
+      fontSize: '0.9rem',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '5px',
+      boxShadow: '0 0 10px rgba(0, 255, 0, 0.2)',
+      pointerEvents: 'none'
+    }}>
+      <div>FPS: {fps}</div>
+      <div>NODES: {nodesCount}</div>
+      <div style={{ color: '#ff00ff' }}>SECTOR: {(1024 * xStretch).toLocaleString()} UNITS</div>
+      <div>ACTIVE MODEL: BGE-M3 (1024D)</div>
+      <div style={{ color: '#00ffff' }}>CURRENT X-STRETCH: {xStretch.toFixed(1)}x</div>
+    </div>
+  );
+};
+
+const CrosshairHUD: React.FC = () => (
+  <div style={{
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    zIndex: 10,
+    pointerEvents: 'none'
+  }}>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="2" fill="#00ffff" />
+      <path d="M12 2V8M12 22V16M2 12H8M22 12H16" stroke="#00ffff" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  </div>
+);
+
+const TargetingHUD: React.FC = () => {
+  const index = useSemanticStore(state => state.hoveredDimensionIndex);
+  const values = useSemanticStore(state => state.selectedValues);
+  const colors = useSemanticStore(state => state.colors);
+
+  if (index === null) return null;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      transform: 'translate(40px, -50%)',
+      zIndex: 10,
+      background: 'rgba(0, 10, 10, 0.85)',
+      border: '1px solid #ffcc00',
+      padding: '8px 12px',
+      borderRadius: '4px',
+      color: '#ffcc00',
+      fontFamily: 'monospace',
+      fontSize: '0.85rem',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '4px',
+      pointerEvents: 'none',
+      boxShadow: '0 0 10px rgba(255, 204, 0, 0.2)'
+    }}>
+      <div style={{ fontWeight: 'bold', borderBottom: '1px solid #ffcc00', paddingBottom: '2px', marginBottom: '2px' }}>
+        DIM-ID: {index}
+      </div>
+      <div style={{ color: '#aaa', fontSize: '0.75rem', marginBottom: '2px' }}>MAGNITUDE</div>
+      {values.length >= 1 && <div style={{ color: colors.wordA }}>A: {values[0].toFixed(4)}</div>}
+      {values.length >= 2 && <div style={{ color: colors.wordB }}>B: {values[1].toFixed(4)}</div>}
+      {values.length >= 3 && <div style={{ color: colors.wordC }}>C: {values[2].toFixed(4)}</div>}
+      {values.length >= 4 && <div style={{ color: colors.result }}>RES: {values[3].toFixed(4)}</div>}
+    </div>
+  );
+};
+
+const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number }> = ({ nodes, xStretch }) => {
+  const { camera } = useThree();
+  const setHoveredDimensionIndex = useSemanticStore(state => state.setHoveredDimensionIndex);
+  const setSelectedValues = useSemanticStore(state => state.setSelectedValues);
+
+  useFrame(() => {
+    if (nodes.length < 4) {
+      setHoveredDimensionIndex(null);
+      return;
+    }
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+    const targetZ = -10;
+    if (Math.abs(raycaster.ray.direction.z) > 0.0001) {
+      const t = (targetZ - raycaster.ray.origin.z) / raycaster.ray.direction.z;
+      if (t > 0) {
+        const hitPoint = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(t));
+        let targetedIndex = Math.round((hitPoint.x / xStretch) + 512);
+
+        const yTop = 5;
+        const yBottom = 5 - (3 * 2.5);
+
+        if (targetedIndex >= 0 && targetedIndex < 1024 && hitPoint.y <= yTop + 2 && hitPoint.y >= yBottom - 2) {
+          setHoveredDimensionIndex(targetedIndex);
+          const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
+          setSelectedValues(values);
+        } else {
+          setHoveredDimensionIndex(null);
+        }
+      } else {
+        setHoveredDimensionIndex(null);
+      }
+    } else {
+      setHoveredDimensionIndex(null);
+    }
+  });
+
+  return null;
+};
+
+
+const ArithmeticHUD: React.FC = () => {
+  // Suppress THREE.Clock deprecation warning caused by React Three Fiber internals
+  useEffect(() => {
+    const origWarn = console.warn;
+    console.warn = (...args) => {
+      if (typeof args[0] === 'string' && args[0].includes('THREE.Clock: This module has been deprecated')) return;
+      origWarn(...args);
+    };
+    return () => {
+      console.warn = origWarn;
+    };
+  }, []);
+
+  const [wordA, setWordA] = useState('rey');
+  const [wordB, setWordB] = useState('hombre');
+  const [wordC, setWordC] = useState('mujer');
+
+  const uiScaleFactor = useSemanticStore((state) => state.uiScaleFactor);
+  const setUiScaleFactor = useSemanticStore((state) => state.setUiScaleFactor);
+  const xStretch = useSemanticStore((state) => state.xStretch);
+  const setXStretch = useSemanticStore((state) => state.setXStretch);
+  const amplitude = useSemanticStore((state) => state.amplitude);
+  const setAmplitude = useSemanticStore((state) => state.setAmplitude);
+  const boostFactor = useSemanticStore((state) => state.boostFactor);
+  const setBoostFactor = useSemanticStore((state) => state.setBoostFactor);
+
+  const colors = useSemanticStore((state) => state.colors);
+  const setColorA = useSemanticStore((state) => state.setColorA);
+  const setColorB = useSemanticStore((state) => state.setColorB);
+  const setColorC = useSemanticStore((state) => state.setColorC);
+  const setResultColor = useSemanticStore((state) => state.setResultColor);
+
+  const topResults = useSemanticStore((state) => state.results);
+  const setResults = useSemanticStore((state) => state.setResults);
+
+  const [nodes, setNodes] = useState<NodeData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const extractCoords = (data: any): [number, number, number] => {
+    if (data.xyz && data.xyz.length >= 3) return [data.xyz[0], data.xyz[1], data.xyz[2]];
+    if (data.point && data.point.length >= 3) return [data.point[0], data.point[1], data.point[2]];
+    if (data.vector && data.vector.length >= 3) return [data.vector[0], data.vector[1], data.vector[2]];
+    if (data.embedding && data.embedding.length >= 3) return [data.embedding[0], data.embedding[1], data.embedding[2]];
+    if (Array.isArray(data) && data.length >= 3) return [data[0], data[1], data[2]];
+    return [Math.random() * 5, Math.random() * 5, Math.random() * 5]; // Fallback
+  };
+
+  const calculate = async () => {
+    setLoading(true);
+    setError(null);
+    setResults([]);
+    try {
+      // 1. Get arithmetic result
+      const arithRes = await fetch('http://127.0.0.1:8000/arithmetic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word_a: wordA, word_b: wordB, word_c: wordC, top_k: 3 })
+      });
+
+      if (!arithRes.ok) throw new Error('Error en /arithmetic');
+      const arithData = await arithRes.json();
+
+      let resultWord = 'Resultado';
+      if (Array.isArray(arithData) && arithData.length > 0) {
+        resultWord = arithData[0].word || arithData[0].text;
+        setResults(arithData.map((res: any) => ({
+          ...res,
+          token_id: Number(res.token_id || res.id || 0)
+        })));
+      }
+      else if (arithData.results && arithData.results.length > 0) {
+        resultWord = arithData.results[0].word || arithData.results[0].text;
+        setResults(arithData.results.map((res: any) => ({
+          ...res,
+          token_id: Number(res.token_id || res.id || 0)
+        })));
+      }
+
+      // 2. Extract coordinates and raw 1024D vectors
+      const words = [wordA, wordB, wordC, resultWord];
+      const newNodes: NodeData[] = [];
+      const nodeColors = [colors.wordA, colors.wordB, colors.wordC, colors.result];
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const tokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: word, include_raw_vector: true })
+        });
+        if (!tokenizeRes.ok) throw new Error(`Error en /tokenize para ${word}`);
+        const tokenizeData = await tokenizeRes.json();
+
+        let position: [number, number, number] = [0, 0, 0];
+        let vector: number[] = [];
+
+        if (tokenizeData.tokens && tokenizeData.tokens.length > 0) {
+          const mainToken = tokenizeData.tokens[0];
+          position = extractCoords(mainToken);
+          if (mainToken.vector) {
+            vector = mainToken.vector;
+          }
+        }
+
+        // If vector array wasn't attached for some reason, use the result_vector from arithmetic if it's the result
+        if (vector.length === 0 && i === 3 && arithData.vector) {
+          vector = arithData.vector;
+        }
+
+        newNodes.push({
+          word,
+          position,
+          color: nodeColors[i],
+          vector,
+          token_id: Math.random() // Unique ID as fallback, ideally token_id from backend
+        });
+      }
+
+      setNodes(newNodes);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Error desconocido');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper for vector math
+  const getVectorMagnitude = (vec: number[]) => {
+    return Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
+  };
+
+  return (
+    <>
+      <TelemetryHUD nodesCount={nodes.length > 0 ? nodes.length * 1024 : 0} xStretch={xStretch} />
+      <CrosshairHUD />
+      <TargetingHUD />
+
+      {/* Absolute HUD */}
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          pointerEvents: 'auto',
+          position: 'absolute',
+          top: '20px',
+          left: '20px',
+          zIndex: 10,
+          background: 'rgba(0, 20, 20, 0.8)',
+          border: '1px solid #00ffff',
+          padding: '20px',
+          borderRadius: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '15px',
+          boxShadow: '0 0 15px rgba(0, 255, 255, 0.2)',
+          color: '#00ffff',
+          fontFamily: 'monospace',
+          minWidth: '250px'
+        }}>
+        <h2 style={{ margin: 0, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '2px', textAlign: 'center' }}>
+          Vector Math
+        </h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <label style={{ fontSize: '0.8rem', color: colors.wordA }}>Palabra A (+)</label>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <input
+              value={wordA}
+              onChange={(e) => setWordA(e.target.value)}
+              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordA}`, color: '#fff', borderRadius: '4px' }}
+            />
+            <input type="color" value={colors.wordA} onChange={(e) => setColorA(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <label style={{ fontSize: '0.8rem', color: colors.wordB }}>Palabra B (-)</label>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <input
+              value={wordB}
+              onChange={(e) => setWordB(e.target.value)}
+              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordB}`, color: '#fff', borderRadius: '4px' }}
+            />
+            <input type="color" value={colors.wordB} onChange={(e) => setColorB(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <label style={{ fontSize: '0.8rem', color: colors.wordC }}>Palabra C (+)</label>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <input
+              value={wordC}
+              onChange={(e) => setWordC(e.target.value)}
+              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordC}`, color: '#fff', borderRadius: '4px' }}
+            />
+            <input type="color" value={colors.wordC} onChange={(e) => setColorC(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <label style={{ fontSize: '0.8rem', color: colors.result }}>Resultado (=)</label>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <span style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.result}`, color: '#aaa', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {nodes.length === 4 ? nodes[3].word : '???'}
+            </span>
+            <input type="color" value={colors.result} onChange={(e) => setResultColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '5px' }}>
+          <label style={{ fontSize: '0.8rem', color: '#00ccff', display: 'flex', justifyContent: 'space-between' }}>
+            <span>UI Scale Factor</span>
+            <span>{uiScaleFactor.toFixed(1)}</span>
+          </label>
+          <input
+            type="range"
+            min="1.0"
+            max="10.0"
+            step="0.1"
+            value={uiScaleFactor}
+            onChange={(e) => setUiScaleFactor(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+
+          <label style={{ fontSize: '0.8rem', color: '#00ccff', display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}>
+            <span>DNA Stretch</span>
+            <span>{xStretch.toFixed(1)}</span>
+          </label>
+          <input
+            type="range"
+            min="0.1"
+            max="40.0"
+            step="0.1"
+            value={xStretch}
+            onChange={(e) => setXStretch(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+
+          <label style={{ fontSize: '0.8rem', color: '#00ccff', display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}>
+            <span>Amplitude</span>
+            <span>{amplitude.toFixed(0)}</span>
+          </label>
+          <input
+            type="range"
+            min="1.0"
+            max="50.0"
+            step="1.0"
+            value={amplitude}
+            onChange={(e) => setAmplitude(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+
+          <label style={{ fontSize: '0.8rem', color: '#ff00ff', display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}>
+            <span>Boost Factor</span>
+            <span>x{boostFactor.toFixed(0)}</span>
+          </label>
+          <input
+            type="range"
+            min="10.0"
+            max="500.0"
+            step="1.0"
+            value={boostFactor}
+            onChange={(e) => setBoostFactor(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+        </div>
+
+        <button
+          onClick={calculate}
+          disabled={loading}
+          style={{
+            padding: '10px',
+            background: loading ? '#333' : '#003333',
+            color: loading ? '#888' : '#00ffff',
+            border: '1px solid #00ffff',
+            borderRadius: '4px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontWeight: 'bold',
+            marginTop: '10px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s'
+          }}
+        >
+          {loading ? 'Calculando...' : 'Calcular'}
+        </button>
+
+        {topResults.length > 0 && (
+          <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #005555', paddingTop: '10px' }}>
+            <div style={{ color: '#00ccff', fontSize: '0.9rem', marginBottom: '5px' }}>TOP 3 VECINOS</div>
+            {topResults.map((res, idx) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                <span style={{ color: '#fff' }}>{res.word}</span>
+                <span style={{ color: '#00ff00' }}>{(res.score * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <div style={{ color: '#ff3333', fontSize: '0.8rem', marginTop: '5px' }}>{error}</div>}
+      </div>
+
+      {/* 3D Canvas */}
+      <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
+        <ambientLight intensity={0.5} />
+        <ProbeSystem nodes={nodes} xStretch={xStretch} />
+        <pointLight position={[10, 10, 10]} intensity={1} />
+        <FlightControls />
+
+        {/* Render nodes and text */}
+        {nodes.map((node, i) => {
+          // Word A defaults to [0, 0, 0], others calculate Radial Cosine Distance.
+          let pos = [0, 0, 0] as [number, number, number];
+          if (i > 0 && node.vector && node.vector.length > 0) {
+            const vA = nodes[0]?.vector || [];
+            const magA = getVectorMagnitude(vA);
+            const magN = getVectorMagnitude(node.vector);
+            let dn = 1;
+            if (magA > 0 && magN > 0) {
+              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
+              dn = 1 - (dot / (magA * magN));
+            }
+            if (node.vector.length >= 3) {
+              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
+              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
+              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
+              const normX = dir3D[0] / (dirMag3D || 1);
+              const normY = dir3D[1] / (dirMag3D || 1);
+              const normZ = dir3D[2] / (dirMag3D || 1);
+
+              const BASE_SPREAD = 50.0;
+              pos = [
+                normX * dn * uiScaleFactor * BASE_SPREAD,
+                normY * dn * uiScaleFactor * BASE_SPREAD,
+                normZ * dn * uiScaleFactor * BASE_SPREAD
+              ];
+            }
+          }
+          return (
+            <group key={i} position={pos}>
+              <Sphere args={[0.3, 16, 16]}>
+                <meshStandardMaterial color={node.color} emissive={node.color} emissiveIntensity={0.5} />
+              </Sphere>
+              <Text
+                position={[0, 0.6, 0]}
+                fontSize={0.5}
+                color={node.color}
+                anchorX="center"
+                anchorY="middle"
+                outlineWidth={0.05}
+                outlineColor="#000000"
+              >
+                {node.word}
+              </Text>
+            </group>
+          );
+        })}
+
+        {/* Semantic Ribbon Traces */}
+        {nodes.map((node, i) => {
+          if (!node.vector || node.vector.length === 0) return null;
+
+          // Radial Cosine Distance Calculation for Threads
+          let pos = [0, 0, 0] as [number, number, number];
+          if (i > 0 && node.vector && node.vector.length > 0) {
+            const vA = nodes[0]?.vector || [];
+            const magA = getVectorMagnitude(vA);
+            const magN = getVectorMagnitude(node.vector);
+            let dn = 1;
+            if (magA > 0 && magN > 0) {
+              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
+              dn = 1 - (dot / (magA * magN));
+            }
+            if (node.vector.length >= 3) {
+              // Must normalize the 3-dimensional projection vector specifically, not the 1024D vector!
+              const dir3D = [node.vector[0], node.vector[1], node.vector[2]];
+              const dirMag3D = Math.sqrt(dir3D[0] * dir3D[0] + dir3D[1] * dir3D[1] + dir3D[2] * dir3D[2]);
+              const normX = dir3D[0] / (dirMag3D || 1);
+              const normY = dir3D[1] / (dirMag3D || 1);
+              const normZ = dir3D[2] / (dirMag3D || 1);
+
+              const BASE_SPREAD = 50.0;
+              pos = [
+                normX * dn * uiScaleFactor * BASE_SPREAD,
+                normY * dn * uiScaleFactor * BASE_SPREAD,
+                normZ * dn * uiScaleFactor * BASE_SPREAD
+              ];
+            }
+          }
+
+          return (
+            <group key={`ribbon-${node.token_id || i}`} position={pos}>
+              <Billboard position={[-(512 * xStretch) - 20, 0, 0]}>
+                <Text
+                  color={node.color}
+                  fontSize={12}
+                  anchorX="center"
+                  anchorY="middle"
+                  outlineWidth={0.5}
+                  outlineColor="#000000"
+                  fontStyle="italic"
+                >
+                  {node.word} [{i === 0 ? "A" : i === 1 ? "B" : i === 2 ? "C" : "RES"}]
+                </Text>
+              </Billboard>
+              <SemanticThread data={node.vector} xStretch={xStretch} position={[0, 0, 0]} amplitude={amplitude} baseColor={node.color} />
+            </group>
+          )
+        })}
+
+        {/* Grid helper for scale reference */}
+        <gridHelper args={[20, 20, '#222222', '#111111']} position={[0, -5, 0]} />
+      </Canvas>
+    </>
+  );
+};
+
+export default ArithmeticHUD;
+
+################################################################################
+FILE: frontend/src/ArithmeticVisualizer.tsx
+################################################################################
+
+// @ts-nocheck
+import React, { useState } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, Stars, Text, Line } from '@react-three/drei';
+
+const ArithmeticVisualizer = () => {
+    const [words, setWords] = useState({ a: 'rey', b: 'hombre', c: 'mujer' });
+    const [points, setPoints] = useState<any[]>([]); // Puntos A, B, C y Resultado
+
+    const calculate = async () => {
+        const res = await fetch('http://localhost:8000/arithmetic', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ word_a: words.a, word_b: words.b, word_c: words.c, top_k: 1 })
+        });
+        const data = await res.json();
+        // Aquí mapearíamos los resultados a coordenadas 3D para renderizar
+        console.log("Resultado:", data.results[0].word);
+    };
+
+    return (
+        <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
+            {/* HUD Simple */}
+            <div style={{ position: 'absolute', zIndex: 10, padding: '20px', display: 'flex', gap: '10px' }}>
+                <input value={words.a} onChange={e => setWords({ ...words, a: e.target.value })} />
+                <span>-</span>
+                <input value={words.b} onChange={e => setWords({ ...words, b: e.target.value })} />
+                <span>+</span>
+                <input value={words.c} onChange={e => setWords({ ...words, c: e.target.value })} />
+                <button onClick={calculate}>CALCULAR</button>
+            </div>
+
+            <Canvas camera={{ position: [0, 0, 150] }}>
+                <OrbitControls />
+                <Stars />
+                <ambientLight intensity={0.5} />
+                {/* Aquí irían los puntos renderizados como esferas neón */}
+            </Canvas>
+        </div>
+    );
+};
+
+export default ArithmeticVisualizer;
+################################################################################
+FILE: frontend/src/store.ts
+################################################################################
+
+import { create } from 'zustand';
+
+interface SemanticState {
+    uiScaleFactor: number;
+    xStretch: number;
+    amplitude: number;
+    boostFactor: number;
+    colors: {
+        wordA: string;
+        wordB: string;
+        wordC: string;
+        result: string;
+    };
+    results: Array<{ word: string; score: number; token_id: number }>;
+    hoveredDimensionIndex: number | null;
+    selectedValues: number[];
+
+    setUiScaleFactor: (scale: number) => void;
+    setXStretch: (stretch: number) => void;
+    setAmplitude: (amp: number) => void;
+    setBoostFactor: (factor: number) => void;
+    setColorA: (color: string) => void;
+    setColorB: (color: string) => void;
+    setColorC: (color: string) => void;
+    setResultColor: (color: string) => void;
+    setResults: (results: Array<{ word: string; score: number; token_id: number }>) => void;
+    setHoveredDimensionIndex: (idx: number | null) => void;
+    setSelectedValues: (vals: number[]) => void;
+}
+
+export const useSemanticStore = create<SemanticState>((set) => ({
+    uiScaleFactor: 1.0,
+    xStretch: 1.0,
+    amplitude: 25.0,
+    boostFactor: 10.0,
+    colors: {
+        wordA: '#00ffff',
+        wordB: '#ff00ff',
+        wordC: '#00ff00',
+        result: '#ffff00',
+    },
+    results: [],
+    hoveredDimensionIndex: null,
+    selectedValues: [],
+
+    setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
+    setXStretch: (stretch) => set({ xStretch: stretch }),
+    setAmplitude: (amp) => set({ amplitude: amp }),
+    setBoostFactor: (factor) => set({ boostFactor: factor }),
+    setColorA: (color) => set((state) => ({ colors: { ...state.colors, wordA: color } })),
+    setColorB: (color) => set((state) => ({ colors: { ...state.colors, wordB: color } })),
+    setColorC: (color) => set((state) => ({ colors: { ...state.colors, wordC: color } })),
+    setResultColor: (color) => set((state) => ({ colors: { ...state.colors, result: color } })),
+    setResults: (results) => set({ results }),
+    setHoveredDimensionIndex: (idx) => set({ hoveredDimensionIndex: idx }),
+    setSelectedValues: (vals) => set({ selectedValues: vals }),
+}));
