@@ -2,15 +2,17 @@ import re
 from pathlib import Path
 from typing import List, Generator
 from pydantic import BaseModel
+from app.core.config import settings
 
 class Chunk(BaseModel):
     text: str
     metadata: dict
 
 class Ingestor:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, chunk_size: int = 1024, chunk_overlap: int = 100):
         self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+        # Dynamically calculated if specific overlap not provided
+        self.chunk_overlap = int(chunk_size * settings.INGEST_CHUNK_OVERLAP_PCT) if chunk_overlap == 50 else chunk_overlap
 
     def load_file(self, file_path: Path) -> Generator[Chunk, None, None]:
         """Loads a file and returns a generator of text chunks."""

@@ -99,8 +99,9 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
             if existing_ids:
                 next_id = max(existing_ids) + 1
         
-        batch_size = 10
+        batch_size = settings.INGEST_BATCH_SIZE
         batch_chunks = []
+        batch_count = 0
         current_page = 0
         
         for chunk in chunk_generator:
@@ -143,7 +144,10 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
                 del db_items
                 del batch_chunks
                 batch_chunks = []
-                gc.collect()
+                batch_count += 1
+                
+                if batch_count % 5 == 0:
+                    gc.collect()
 
         # Final flush
         if batch_chunks:
@@ -185,6 +189,47 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
             pass
 
 # --- Routes ---
+
+def get_directory_size(path: Path) -> float:
+    total_size = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+    return total_size / (1024 * 1024)
+
+@router.get("/system/stats")
+async def system_stats():
+    import psutil
+    
+    # OS level
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    # DB level
+    db_size_mb = get_directory_size(settings.LANCEDB_URI)
+    
+    # Backend level
+    process = psutil.Process()
+    be_cpu = process.cpu_percent(interval=0.1)
+    be_mem = process.memory_info().rss / (1024 * 1024)
+    
+    # Ingestion status
+    active_tasks = 0
+    ingestion_status = "idle"
+    for tid, meta in process_metadata.items():
+        if meta.get("status") == "processing":
+            active_tasks += 1
+            ingestion_status = "processing"
+    
+    return {
+        "ps": { "cpu_percent": cpu_percent, "mem_percent": mem.percent, "disk_percent": disk.percent },
+        "db": { "size_mb": db_size_mb },
+        "be": { "cpu_percent": be_cpu, "mem_mb": be_mem },
+        "ingestion": { "active_tasks": active_tasks, "status": ingestion_status }
+    }
 
 @router.post("/galaxy/config")
 async def update_config(request: ConfigUpdateRequest):

@@ -54,7 +54,11 @@
         "streaming_ingestion": true,
         "hard_memory_cap": true,
         "commander_tui_enabled": true,
-        "auto_port_clearing": true
+        "auto_port_clearing": true,
+        "resource_telemetry_enabled": true,
+        "ascii_monkey_hud": true,
+        "animated_ascii_hud": true,
+        "etr_timer_active": true
     },
     "constraints": {
         "manifold_bounds": [

@@ -6,6 +6,7 @@ import { useKeyboardControls } from '../hooks/useKeyboardControls';
 import { SemanticThread } from './SemanticThread';
 import { ChatHUD } from './ChatHUD';
 import { useSemanticStore } from '../store';
+import { TelemetryMonkeyHUD } from './TelemetryMonkeyHUD';
 
 const FlightControls: React.FC = () => {
   const controlsRef = useRef<any>(null);
@@ -485,6 +486,12 @@ const ArithmeticHUD: React.FC = () => {
   const setCurrentTaskId = useSemanticStore((state) => state.setCurrentTaskId);
   const ramUsageMb = useSemanticStore((state) => state.ramUsageMb);
   const setRamUsageMb = useSemanticStore((state) => state.setRamUsageMb);
+  const totalChunks = useSemanticStore((state) => state.totalChunks);
+  const setTotalChunks = useSemanticStore((state) => state.setTotalChunks);
+  const processedChunks = useSemanticStore((state) => state.processedChunks);
+  const setProcessedChunks = useSemanticStore((state) => state.setProcessedChunks);
+  const ingestStartTime = useSemanticStore((state) => state.ingestStartTime);
+  const setIngestStartTime = useSemanticStore((state) => state.setIngestStartTime);
 
   const colors = useSemanticStore((state) => state.colors);
   const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
@@ -544,6 +551,9 @@ const ArithmeticHUD: React.FC = () => {
     setInjectorStatus('Vectorizing PDF (Initiating)...');
     setIsProcessing(true);
     setUploadStatus(0);
+    setTotalChunks(0);
+    setProcessedChunks(0);
+    setIngestStartTime(Date.now());
 
     const formData = new FormData();
     formData.append('file', file);
@@ -567,6 +577,8 @@ const ArithmeticHUD: React.FC = () => {
             const statusData = await statusRes.json();
 
             if (statusData.total_chunks > 0) {
+              setTotalChunks(statusData.total_chunks);
+              setProcessedChunks(statusData.processed_chunks);
               const progress = Math.round((statusData.processed_chunks / statusData.total_chunks) * 100);
               setUploadStatus(progress);
             }
@@ -586,6 +598,9 @@ const ArithmeticHUD: React.FC = () => {
                 setInjectorStatus('');
                 setUploadStatus(0);
                 setRamUsageMb(0);
+                setTotalChunks(0);
+                setProcessedChunks(0);
+                setIngestStartTime(null);
               }, 1500);
             } else if (statusData.status === 'CRITICAL_MEMORY_ABORT') {
               window.clearInterval(pollInterval);
@@ -794,8 +809,69 @@ const ArithmeticHUD: React.FC = () => {
     };
   }, [nodes, firewallThreshold]);
 
+  // ETR Overlay Calculation
+  let etrText = "CALCULATING...";
+  let progressPercentage = 0;
+  if (isProcessing && totalChunks > 0 && processedChunks > 0 && ingestStartTime) {
+    progressPercentage = (processedChunks / totalChunks) * 100;
+    const now = Date.now();
+    const elapsedTime = now - ingestStartTime;
+    const timePerChunk = elapsedTime / processedChunks;
+    const chunksRemaining = totalChunks - processedChunks;
+    let etrMs = timePerChunk * chunksRemaining;
+
+    if (etrMs === Infinity || isNaN(etrMs)) {
+      etrText = "CALCULATING...";
+    } else {
+      const totalSeconds = Math.max(0, Math.floor(etrMs / 1000));
+      const mm = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      const ss = String(totalSeconds % 60).padStart(2, '0');
+      etrText = `ETR: ${mm}:${ss}`;
+    }
+  }
+
   return (
     <>
+      <TelemetryMonkeyHUD isBlocked={firewallStatus?.isBlocked || false} />
+
+      {/* ETR Tactical Overlay */}
+      {isProcessing && totalChunks > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: 'rgba(0, 20, 20, 0.85)',
+          border: '1px solid #00ffff',
+          padding: '10px 20px',
+          borderRadius: '4px',
+          fontFamily: 'monospace',
+          color: '#00ffff',
+          boxShadow: '0 0 15px rgba(0, 255, 255, 0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '8px',
+          minWidth: '300px'
+        }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>
+            INGESTION METRICS
+          </div>
+          <div style={{ width: '100%', height: '8px', background: '#003333', border: '1px solid #005555' }}>
+            <div style={{
+              width: `${progressPercentage}%`,
+              height: '100%',
+              background: progressPercentage < 100 ? '#00ffff' : '#00ff00',
+              transition: 'width 0.3s ease-out'
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '0.8rem' }}>
+            <span>CHUNKS: {processedChunks} / {totalChunks}</span>
+            <span style={{ color: '#ffcc00' }}>{etrText}</span>
+          </div>
+        </div>
+      )}
       <TelemetryHUD nodesCount={displayNodes.length > 0 ? displayNodes.length * 1024 : 0} xStretch={xStretch} />
       <CrosshairHUD />
       <TargetingHUD />

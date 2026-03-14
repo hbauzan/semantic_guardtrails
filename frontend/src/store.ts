@@ -24,6 +24,9 @@ interface SemanticState {
     isProcessing: boolean;
     currentTaskId: string | null;
     ramUsageMb: number;
+    totalChunks: number;
+    processedChunks: number;
+    ingestStartTime: number | null;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
@@ -46,6 +49,9 @@ interface SemanticState {
     setIsProcessing: (processing: boolean) => void;
     setCurrentTaskId: (id: string | null) => void;
     setRamUsageMb: (mb: number) => void;
+    setTotalChunks: (chunks: number) => void;
+    setProcessedChunks: (chunks: number) => void;
+    setIngestStartTime: (time: number | null) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -72,6 +78,9 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     isProcessing: false,
     currentTaskId: null,
     ramUsageMb: 0,
+    totalChunks: 0,
+    processedChunks: 0,
+    ingestStartTime: null,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
@@ -94,4 +103,7 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     setIsProcessing: (processing) => set({ isProcessing: processing }),
     setCurrentTaskId: (id) => set({ currentTaskId: id }),
     setRamUsageMb: (mb) => set({ ramUsageMb: mb }),
+    setTotalChunks: (chunks: number) => set({ totalChunks: chunks }),
+    setProcessedChunks: (chunks: number) => set({ processedChunks: chunks }),
+    setIngestStartTime: (time: number | null) => set({ ingestStartTime: time }),
 }));

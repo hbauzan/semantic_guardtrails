@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     FIREWALL_THRESHOLD: float = 0.45
     LOAD_DEMOS: bool = False
+    INGEST_BATCH_SIZE: int = 32
+    INGEST_CHUNK_OVERLAP_PCT: float = 0.15
     
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent

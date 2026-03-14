@@ -54,6 +54,9 @@ The UI has been refactored into a **Dual-Zone Security Console**, purging old ve
 ### Deep Observability & Telemetry
 ### Deep Observability & Telemetry
 *   **Zero-Dependency Native HUD**: Telemetry overlay built built with `requestAnimationFrame` ensuring zero external profiling overhead. Reports active **FPS**, total **Nodes**, current **xStretch**, and total **SECTOR SIZE**.
+*   **System Telemetry API**: `GET /system/stats` exposing OS-level, Process-level, and DB-level metrics via psutil.
+*   **ASCII Monkey HUD**: Bottom-right React overlay utilizing a custom `useAsciiAnimation` hook to cycle frame-by-frame ASCII art (Monkey Island motif) at 250ms intervals. State is deterministically bound to Zustand telemetry properties (`SAFE`, `WORKING` during ingestions, `WARNING` when RAM > 4000MB, and `CRITICAL` during Firewall blocks).
+*   **ETR Tactical Overlay**: Centralized HUD element tracking chunk-by-chunk ingestion progress dynamically polling `/corpus/task-status/{task_id}`. Employs ETR predictive math logic: `ETR = ((CurrentTime - IngestStartTime) / ProcessedChunks) * (TotalChunks - ProcessedChunks)`, gracefully handling Infinity/NaN edge states during initial spin-up.
 *   **L2 Analysis Panel**: Upon click-to-inspecting a semantic thread, reveals the raw Euclidean Distance ($D_n$), live mathematical formulation `sqrt(sum((A_i - B_i)^2))`, and derived percentage confidence calculated as `1 / (1 + D_n)`.
     *   **Noise Delta Map**: Explicitly enumerates dimensions exhibiting high variance (`delta > 0.2`) relative to the Master Baseline.
 *   **Infinite Visibility Render bounds**: Canvas camera Frustum is statically configured to `{ near: 1, far: 200000 }` to guarantee no thread dropout at x40 stretches.
