@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 17:35:28.245168
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 19:20:22.368826
 
 
 ################################################################################
@@ -19,7 +19,9 @@ FILE: architecture_spec.md
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
 
 ## 4. Local RAG & Sovereign AI Engine
-* **Knowledge Ingestion (PyMuPDF):** Directly processes PDF documentation into `sovereign_knowledge` LanceDB table.
+* **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks`. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
+* **RSS Hard Memory Cap ($4.0$ GB)**: Utilizes `psutil` natively monitoring `rss_bytes` inside ingestion workers. Upon exceeding memory bounds, process initiates `CRITICAL_MEMORY_ABORT`.
+* **Vectorization Telemetry Engine**: Exposes real-time memory usage alongside processed pages via `/corpus/task-status/{task_id}` for native telemetry HUD visualization during processing. 
 * **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.
 * **L2 Semantic Firewall Interceptor:** Evaluates inbound chat prompts against the `sovereign_knowledge` vectors using Euclidean Distance ($D_n$). Intercepts and blocks responses if divergence threshold is exceeded and `[FW=ON]` is active.
 
@@ -114,7 +116,12 @@ FILE: manifest.json
         "local_rag_enabled": true,
         "ollama_integration": true,
         "pdf_ingest": true,
-        "pdf_upload_ui": true
+        "pdf_upload_ui": true,
+        "async_pdf_vectorization": true,
+        "progress_telemetry_ui": true,
+        "batch_embedding_optimization": true,
+        "streaming_ingestion": true,
+        "hard_memory_cap": true
     },
     "constraints": {
         "manifold_bounds": [
@@ -191,7 +198,7 @@ if __name__ == "__main__":
 FILE: backend/app/api/routes.py
 ################################################################################
 
-from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -203,6 +210,7 @@ import pyarrow as pa
 import pandas as pd
 import tempfile
 import json
+import uuid
 from pathlib import Path
 
 from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
@@ -253,10 +261,128 @@ class InjectPackRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     firewall_threshold: float
 
+# --- Search Models ---
 class ChatRequest(BaseModel):
     prompt: str
     model: str = "llama3.1"
     top_k: int = 3
+
+# --- Global Task Registry ---
+process_metadata: Dict[str, Any] = {}
+
+def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
+    try:
+        process_metadata[task_id]["status"] = "processing"
+        
+        import fitz
+        import psutil
+        import gc
+        
+        try:
+            doc = fitz.open(file_path)
+            total_pages = doc.page_count
+            doc.close()
+        except Exception:
+            total_pages = 1
+            
+        process_metadata[task_id]["total_chunks"] = total_pages
+        process_metadata[task_id]["processed_chunks"] = 0
+        process_metadata[task_id]["ram_usage_mb"] = 0
+        
+        ingestor = Ingestor()
+        chunk_generator = ingestor.load_file(file_path)
+        
+        df = knowledge_storage.get_all_vectors()
+        next_id = 20000
+        if not df.empty and 'id' in df.columns:
+            existing_ids = df['id'].tolist()
+            if existing_ids:
+                next_id = max(existing_ids) + 1
+        
+        batch_size = 10
+        batch_chunks = []
+        current_page = 0
+        
+        for chunk in chunk_generator:
+            # RSS Hard Cap Monitor
+            process = psutil.Process()
+            rss_bytes = process.memory_info().rss
+            ram_mb = rss_bytes / (1024 * 1024)
+            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
+            
+            if rss_bytes > (4 * 1024 * 1024 * 1024):
+                print(f"[CRITICAL_MEMORY_ABORT] Task {task_id} exceeded 4GB RAM threshold ({ram_mb:.0f} MB). Terminating.")
+                process_metadata[task_id]["status"] = "CRITICAL_MEMORY_ABORT"
+                return
+                
+            batch_chunks.append(chunk)
+            current_page = max(current_page, chunk.metadata.get("page", 1))
+            
+            if len(batch_chunks) >= batch_size:
+                db_items = []
+                for b_chunk in batch_chunks:
+                    vector = embedder.encode(b_chunk.text)
+                    item = DBItem(
+                        id=next_id,
+                        text=b_chunk.text,
+                        vector=vector.tolist(),
+                        metadata={"source": filename, **b_chunk.metadata},
+                        cluster_label="SOVEREIGN_KNOWLEDGE",
+                        cluster_id=-2
+                    )
+                    db_items.append(item)
+                    next_id += 1
+                
+                if db_items:
+                    knowledge_storage.add(db_items)
+                    
+                process_metadata[task_id]["processed_chunks"] = current_page
+                print(f"[PDF BATCH] Processed up to page {current_page}/{total_pages}. RAM: {ram_mb:.0f} MB")
+                
+                # Explicit memory purge
+                del db_items
+                del batch_chunks
+                batch_chunks = []
+                gc.collect()
+
+        # Final flush
+        if batch_chunks:
+            db_items = []
+            for b_chunk in batch_chunks:
+                vector = embedder.encode(b_chunk.text)
+                item = DBItem(
+                    id=next_id,
+                    text=b_chunk.text,
+                    vector=vector.tolist(),
+                    metadata={"source": filename, **b_chunk.metadata},
+                    cluster_label="SOVEREIGN_KNOWLEDGE",
+                    cluster_id=-2
+                )
+                db_items.append(item)
+                next_id += 1
+            if db_items:
+                knowledge_storage.add(db_items)
+                
+            process = psutil.Process()
+            ram_mb = process.memory_info().rss / (1024 * 1024)
+            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
+            process_metadata[task_id]["processed_chunks"] = total_pages
+            
+            del db_items
+            del batch_chunks
+            gc.collect()
+
+        process_metadata[task_id]["status"] = "completed"
+        
+    except Exception as e:
+        print(f"[PDF ERROR] Task {task_id} failed: {e}")
+        process_metadata[task_id]["status"] = "error"
+    finally:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except:
+            pass
 
 # --- Routes ---
 
@@ -323,6 +449,7 @@ async def chat_endpoint(
 
 @router.post("/corpus/upload-pdf")
 async def upload_pdf(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     embedder: Embedder = Depends(get_embedder),
     knowledge_storage: Storage = Depends(get_knowledge_storage)
@@ -332,38 +459,34 @@ async def upload_pdf(
             tmp.write(await file.read())
             tmp_path = Path(tmp.name)
             
-        ingestor = Ingestor()
-        chunks = ingestor.load_file(tmp_path)
+        task_id = str(uuid.uuid4())
         
-        db_items = []
-        df = knowledge_storage.get_all_vectors()
-        next_id = 20000
-        if not df.empty and 'id' in df.columns:
-            existing_ids = df['id'].tolist()
-            if existing_ids:
-                next_id = max(existing_ids) + 1
-                 
-        for chunk in chunks:
-            vector = embedder.encode(chunk.text)
-            item = DBItem(
-                id=next_id,
-                text=chunk.text,
-                vector=vector.tolist(),
-                metadata={"source": file.filename, **chunk.metadata},
-                cluster_label="SOVEREIGN_KNOWLEDGE",
-                cluster_id=-2
-            )
-            db_items.append(item)
-            next_id += 1
-            
-        if db_items:
-            knowledge_storage.add(db_items)
-            
-        tmp_path.unlink()
+        # Initialize registry state immediately
+        process_metadata[task_id] = {
+            "status": "processing",
+            "total_chunks": 0,
+            "processed_chunks": 0,
+            "ram_usage_mb": 0
+        }
         
-        return {"status": "success", "filename": file.filename, "chunks_ingested": len(db_items)}
+        background_tasks.add_task(
+            process_pdf_background,
+            task_id,
+            tmp_path,
+            file.filename,
+            embedder,
+            knowledge_storage
+        )
+        
+        return {"status": "success", "task_id": task_id, "filename": file.filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/corpus/task-status/{task_id}")
+async def task_status(task_id: str):
+    if task_id not in process_metadata:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return process_metadata[task_id]
 
 @router.post("/galaxy/simulate")
 async def simulate_query(
@@ -1140,6 +1263,7 @@ pylance>=0.10.0
 plotly>=5.18.0
 rich>=13.0.0
 pymupdf>=1.23.0
+psutil>=5.9.0
 
 ################################################################################
 FILE: frontend/package.json
@@ -2135,19 +2259,19 @@ class Ingestor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def load_file(self, file_path: Path) -> List[Chunk]:
-        """Loads a file and returns a list of text chunks."""
+    def load_file(self, file_path: Path) -> Generator[Chunk, None, None]:
+        """Loads a file and returns a generator of text chunks."""
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
         if file_path.suffix.lower() == '.txt':
-            return self._load_text(file_path)
+            yield from self._load_text(file_path)
         elif file_path.suffix.lower() == '.pdf':
-            return self._load_pdf(file_path)
+            yield from self._load_pdf(file_path)
         else:
             raise ValueError(f"Unsupported file type: {file_path.suffix}")
 
-    def _load_text(self, file_path: Path) -> List[Chunk]:
+    def _load_text(self, file_path: Path) -> Generator[Chunk, None, None]:
         with open(file_path, 'r', encoding='utf-8') as f:
             text = f.read()
             # If it's a vocab file (one word per line), treat differently?
@@ -2161,26 +2285,25 @@ class Ingestor:
             # Simple heuristic: if avg line length < 20 chars, maybe it's a list.
             lines = text.splitlines()
             if len(lines) > 0 and (len(text) / len(lines)) < 30:
-                 return [Chunk(text=line.strip(), metadata={"source": str(file_path), "line": i+1}) 
-                         for i, line in enumerate(lines) if line.strip()]
+                 for i, line in enumerate(lines):
+                     if line.strip():
+                         yield Chunk(text=line.strip(), metadata={"source": str(file_path), "line": i+1})
+                 return
 
-            return list(self._chunk_text(text, source=str(file_path)))
+            yield from self._chunk_text(text, source=str(file_path))
 
-    def _load_pdf(self, file_path: Path) -> List[Chunk]:
+    def _load_pdf(self, file_path: Path) -> Generator[Chunk, None, None]:
         try:
             import fitz # PyMuPDF
         except ImportError:
             raise ImportError("fitz (pymupdf) is required for PDF ingestion. pip install pymupdf")
         
         doc = fitz.open(file_path)
-        chunks = []
         for i, page in enumerate(doc):
             text = page.get_text()
             if text:
-                curr_chunks = self._chunk_text(text, source=str(file_path), page=i+1)
-                chunks.extend(curr_chunks)
+                yield from self._chunk_text(text, source=str(file_path), page=i+1)
         doc.close()
-        return chunks
 
     def _chunk_text(self, text: str, **metadata) -> Generator[Chunk, None, None]:
         """Simple sliding window chunker."""
@@ -3073,6 +3196,50 @@ def test_bge_m3_vector_parity_chat_prompt():
         log_fail(f"Exception: {e}")
         return False
 
+def test_async_pdf_upload_task_creation():
+    log_section("Testing Async PDF Upload Task Creation (/corpus/upload-pdf)")
+    try:
+        files = {'file': ('test.pdf', b'dummy content', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if "task_id" not in data:
+                log_fail("Upload response missing task_id.")
+                return False
+            log_success(f"Async PDF Upload Task Creation OK (Task ID: {data['task_id']})")
+            return True
+        log_fail(f"Upload failed: {r.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_task_status_endpoint():
+    log_section("Testing Task Status Endpoint (/corpus/task-status/{task_id})")
+    try:
+        files = {'file': ('test2.pdf', b'dummy content 2', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Failed to create task for status test.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+        if status_r.status_code == 200:
+            status_data = status_r.json()
+            if "status" not in status_data or "total_chunks" not in status_data or "processed_chunks" not in status_data:
+                 log_fail("Status schema missing required fields.")
+                 return False
+            log_success(f"Task Status Endpoint OK (Status: {status_data['status']})")
+            return True
+        else:
+            log_fail(f"Status query failed: {status_r.text}")
+            return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
 def test_firewall_interceptor_blocking():
     log_section("Testing Firewall Interceptor Blocking Logic")
     try:
@@ -3113,6 +3280,70 @@ def test_firewall_interceptor_blocking():
          log_fail(f"Exception: {e}")
          return False
 
+def test_task_status_ram_telemetry():
+    log_section("Testing Task Status RAM Telemetry (/corpus/task-status/{task_id})")
+    try:
+        files = {'file': ('test_ram.pdf', b'dummy content ram', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Failed to create task for status test.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+        if status_r.status_code == 200:
+            status_data = status_r.json()
+            if "ram_usage_mb" not in status_data:
+                 log_fail("Status schema missing 'ram_usage_mb' field.")
+                 return False
+            
+            if not isinstance(status_data["ram_usage_mb"], (int, float)):
+                 log_fail("ram_usage_mb is not numeric.")
+                 return False
+                 
+            log_success(f"Task Status RAM Telemetry OK (RAM: {status_data['ram_usage_mb']} MB)")
+            return True
+        else:
+            log_fail(f"Status query failed: {status_r.text}")
+            return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_streaming_ingestor_generator():
+    log_section("Testing Streaming Ingestor Generator Pattern")
+    try:
+        import sys
+        import os
+        # Add backend to path if not present for the strict direct import
+        sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
+        
+        from app.modules.ingestor import Ingestor
+        import types
+        import tempfile
+        from pathlib import Path
+        
+        ingestor = Ingestor()
+        with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", delete=False) as f:
+            f.write("test data chunking")
+            temp_path = Path(f.name)
+            
+        try:
+            result = ingestor.load_file(temp_path)
+            if isinstance(result, types.GeneratorType):
+                log_success("Streaming Ingestor Generator Pattern OK")
+                return True
+            else:
+                log_fail(f"Ingestor returned {type(result)}, expected GeneratorType")
+                return False
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    except Exception as e:
+        log_fail(f"Exception during Ingestor Generator test: {e}")
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -3122,7 +3353,8 @@ def main():
         test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
         test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
-        test_bge_m3_vector_parity_chat_prompt, test_firewall_interceptor_blocking
+        test_bge_m3_vector_parity_chat_prompt, test_async_pdf_upload_task_creation, test_task_status_endpoint, test_firewall_interceptor_blocking,
+        test_task_status_ram_telemetry, test_streaming_ingestor_generator
     ]
     all_passed = True
     for test in tests:
@@ -3510,9 +3742,10 @@ echo "🤖 Checking Sovereign Ollama Motor..."
 
 echo "🚀 Iniciando Semantic Guardrails Backend"
 source "$PROJECT_ROOT/sg_env/bin/activate"
+pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 export PYTHONPATH="$PYTHONPATH:$PROJECT_ROOT/backend"
 cd "$PROJECT_ROOT/backend"
-uvicorn app.main:app --reload --host 127.0.0.1 --port $PORT
+uvicorn app.main:app --reload --host 127.0.0.1 --port $PORT --timeout-graceful-shutdown 2
 
 ################################################################################
 FILE: run_ui.sh
@@ -3538,6 +3771,8 @@ FILE: run_tests.sh
 set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+trap 'echo "Tests interrupted or completed, cleaning up..."; exit' INT TERM EXIT
+
 echo "🧹 Clearing Vite and Build caches..."
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
@@ -3548,6 +3783,7 @@ echo "🤖 Checking Sovereign Ollama Motor..."
 "$PROJECT_ROOT/sovereign.sh" check || echo "⚠️ Proceeding without Ollama. RAG tests may fail."
 
 source "$PROJECT_ROOT/sg_env/bin/activate"
+pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
 python3 backend/perform_tests.py
 
@@ -4272,6 +4508,13 @@ const ArithmeticHUD: React.FC = () => {
   const firewallThreshold = useSemanticStore((state) => state.firewallThreshold);
   const setFirewallThreshold = useSemanticStore((state) => state.setFirewallThreshold);
   const setIsTyping = useSemanticStore((state) => state.setIsTyping);
+  const uploadStatus = useSemanticStore((state) => state.uploadStatus);
+  const setUploadStatus = useSemanticStore((state) => state.setUploadStatus);
+  const isProcessing = useSemanticStore((state) => state.isProcessing);
+  const setIsProcessing = useSemanticStore((state) => state.setIsProcessing);
+  const setCurrentTaskId = useSemanticStore((state) => state.setCurrentTaskId);
+  const ramUsageMb = useSemanticStore((state) => state.ramUsageMb);
+  const setRamUsageMb = useSemanticStore((state) => state.setRamUsageMb);
 
   const colors = useSemanticStore((state) => state.colors);
   const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
@@ -4328,7 +4571,9 @@ const ArithmeticHUD: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setInjectorStatus('Vectorizing PDF...');
+    setInjectorStatus('Vectorizing PDF (Initiating)...');
+    setIsProcessing(true);
+    setUploadStatus(0);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -4339,16 +4584,59 @@ const ArithmeticHUD: React.FC = () => {
         body: formData
       });
       if (!res.ok) throw new Error('Failed to upload PDF');
-      setInjectorStatus('Knowledge Updated! Refreshing Radar...');
 
-      // Auto refresh the radar/HUD
-      setTimeout(() => {
-        calculate();
-        setShowInjector(false);
-        setInjectorStatus('');
-      }, 1500);
+      const data = await res.json();
+      const taskId = data.task_id;
+      setCurrentTaskId(taskId);
+      setInjectorStatus('Processing Vectors...');
+
+      const pollInterval = window.setInterval(async () => {
+        try {
+          const statusRes = await fetch(`http://127.0.0.1:8000/corpus/task-status/${taskId}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+
+            if (statusData.total_chunks > 0) {
+              const progress = Math.round((statusData.processed_chunks / statusData.total_chunks) * 100);
+              setUploadStatus(progress);
+            }
+            if (statusData.ram_usage_mb !== undefined) {
+              setRamUsageMb(statusData.ram_usage_mb);
+            }
+
+            if (statusData.status === 'completed') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('Knowledge Updated! Refreshing Radar...');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+
+              setTimeout(() => {
+                calculate();
+                setShowInjector(false);
+                setInjectorStatus('');
+                setUploadStatus(0);
+                setRamUsageMb(0);
+              }, 1500);
+            } else if (statusData.status === 'CRITICAL_MEMORY_ABORT') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('CRITICAL MEMORY ABORT: 4GB RAM Cap Exceeded');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+            } else if (statusData.status === 'error') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('Error processing PDF');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+            }
+          }
+        } catch (pollErr) {
+          console.error("Polling error", pollErr);
+        }
+      }, 500);
+
     } catch (err: any) {
       setInjectorStatus(`Error: ${err.message}`);
+      setIsProcessing(false);
     } finally {
       // Clear the input so the user can select the same file again if they want
       e.target.value = '';
@@ -4640,16 +4928,33 @@ const ArithmeticHUD: React.FC = () => {
               type="file"
               accept=".pdf"
               onChange={handleUploadPdf}
+              disabled={isProcessing}
               style={{
                 color: '#aaa',
                 fontFamily: 'monospace',
                 fontSize: '0.8rem',
-                cursor: 'pointer'
+                cursor: isProcessing ? 'not-allowed' : 'pointer'
               }}
             />
+            {isProcessing && (
+              <div style={{ marginTop: '10px', background: '#002222', borderRadius: '4px', height: '8px', width: '100%', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${uploadStatus}%`,
+                  background: '#00ffff',
+                  boxShadow: '0 0 10px #00ffff',
+                  transition: 'width 0.3s ease-out'
+                }} />
+              </div>
+            )}
+            {isProcessing && ramUsageMb > 0 && (
+              <div style={{ marginTop: '5px', color: '#ffcc00', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                Worker RAM: {ramUsageMb} MB
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
+            <span style={{ color: injectorStatus.includes('Error') || injectorStatus.includes('CRITICAL') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={() => setShowInjector(false)}
@@ -5111,6 +5416,10 @@ interface SemanticState {
     chatHistory: Array<{ role: string; content: string }>;
     chatImpactNode: any | null;
     firewallEnabled: boolean;
+    uploadStatus: number;
+    isProcessing: boolean;
+    currentTaskId: string | null;
+    ramUsageMb: number;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
@@ -5129,6 +5438,10 @@ interface SemanticState {
     setChatHistory: (history: Array<{ role: string; content: string }>) => void;
     setChatImpactNode: (node: any | null) => void;
     setFirewallEnabled: (enabled: boolean) => void;
+    setUploadStatus: (status: number) => void;
+    setIsProcessing: (processing: boolean) => void;
+    setCurrentTaskId: (id: string | null) => void;
+    setRamUsageMb: (mb: number) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -5151,6 +5464,10 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     chatHistory: [],
     chatImpactNode: null,
     firewallEnabled: false,
+    uploadStatus: 0,
+    isProcessing: false,
+    currentTaskId: null,
+    ramUsageMb: 0,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
@@ -5169,4 +5486,8 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     setChatHistory: (history) => set({ chatHistory: history }),
     setChatImpactNode: (node) => set({ chatImpactNode: node }),
     setFirewallEnabled: (enabled) => set({ firewallEnabled: enabled }),
+    setUploadStatus: (status) => set({ uploadStatus: status }),
+    setIsProcessing: (processing) => set({ isProcessing: processing }),
+    setCurrentTaskId: (id) => set({ currentTaskId: id }),
+    setRamUsageMb: (mb) => set({ ramUsageMb: mb }),
 }));

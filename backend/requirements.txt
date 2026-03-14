@@ -19,3 +19,4 @@ pylance>=0.10.0
 plotly>=5.18.0
 rich>=13.0.0
 pymupdf>=1.23.0
+psutil>=5.9.0

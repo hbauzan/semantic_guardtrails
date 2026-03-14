@@ -655,6 +655,50 @@ def test_bge_m3_vector_parity_chat_prompt():
         log_fail(f"Exception: {e}")
         return False
 
+def test_async_pdf_upload_task_creation():
+    log_section("Testing Async PDF Upload Task Creation (/corpus/upload-pdf)")
+    try:
+        files = {'file': ('test.pdf', b'dummy content', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if "task_id" not in data:
+                log_fail("Upload response missing task_id.")
+                return False
+            log_success(f"Async PDF Upload Task Creation OK (Task ID: {data['task_id']})")
+            return True
+        log_fail(f"Upload failed: {r.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_task_status_endpoint():
+    log_section("Testing Task Status Endpoint (/corpus/task-status/{task_id})")
+    try:
+        files = {'file': ('test2.pdf', b'dummy content 2', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Failed to create task for status test.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+        if status_r.status_code == 200:
+            status_data = status_r.json()
+            if "status" not in status_data or "total_chunks" not in status_data or "processed_chunks" not in status_data:
+                 log_fail("Status schema missing required fields.")
+                 return False
+            log_success(f"Task Status Endpoint OK (Status: {status_data['status']})")
+            return True
+        else:
+            log_fail(f"Status query failed: {status_r.text}")
+            return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
 def test_firewall_interceptor_blocking():
     log_section("Testing Firewall Interceptor Blocking Logic")
     try:
@@ -695,6 +739,70 @@ def test_firewall_interceptor_blocking():
          log_fail(f"Exception: {e}")
          return False
 
+def test_task_status_ram_telemetry():
+    log_section("Testing Task Status RAM Telemetry (/corpus/task-status/{task_id})")
+    try:
+        files = {'file': ('test_ram.pdf', b'dummy content ram', 'application/pdf')}
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Failed to create task for status test.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+        if status_r.status_code == 200:
+            status_data = status_r.json()
+            if "ram_usage_mb" not in status_data:
+                 log_fail("Status schema missing 'ram_usage_mb' field.")
+                 return False
+            
+            if not isinstance(status_data["ram_usage_mb"], (int, float)):
+                 log_fail("ram_usage_mb is not numeric.")
+                 return False
+                 
+            log_success(f"Task Status RAM Telemetry OK (RAM: {status_data['ram_usage_mb']} MB)")
+            return True
+        else:
+            log_fail(f"Status query failed: {status_r.text}")
+            return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_streaming_ingestor_generator():
+    log_section("Testing Streaming Ingestor Generator Pattern")
+    try:
+        import sys
+        import os
+        # Add backend to path if not present for the strict direct import
+        sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
+        
+        from app.modules.ingestor import Ingestor
+        import types
+        import tempfile
+        from pathlib import Path
+        
+        ingestor = Ingestor()
+        with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", delete=False) as f:
+            f.write("test data chunking")
+            temp_path = Path(f.name)
+            
+        try:
+            result = ingestor.load_file(temp_path)
+            if isinstance(result, types.GeneratorType):
+                log_success("Streaming Ingestor Generator Pattern OK")
+                return True
+            else:
+                log_fail(f"Ingestor returned {type(result)}, expected GeneratorType")
+                return False
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    except Exception as e:
+        log_fail(f"Exception during Ingestor Generator test: {e}")
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -704,7 +812,8 @@ def main():
         test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
         test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
-        test_bge_m3_vector_parity_chat_prompt, test_firewall_interceptor_blocking
+        test_bge_m3_vector_parity_chat_prompt, test_async_pdf_upload_task_creation, test_task_status_endpoint, test_firewall_interceptor_blocking,
+        test_task_status_ram_telemetry, test_streaming_ingestor_generator
     ]
     all_passed = True
     for test in tests:

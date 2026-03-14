@@ -21,6 +21,7 @@ echo "🤖 Checking Sovereign Ollama Motor..."
 
 echo "🚀 Iniciando Semantic Guardrails Backend"
 source "$PROJECT_ROOT/sg_env/bin/activate"
+pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 export PYTHONPATH="$PYTHONPATH:$PROJECT_ROOT/backend"
 cd "$PROJECT_ROOT/backend"
-uvicorn app.main:app --reload --host 127.0.0.1 --port $PORT
+uvicorn app.main:app --reload --host 127.0.0.1 --port $PORT --timeout-graceful-shutdown 2

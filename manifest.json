@@ -47,7 +47,14 @@
         "local_rag_enabled": true,
         "ollama_integration": true,
         "pdf_ingest": true,
-        "pdf_upload_ui": true
+        "pdf_upload_ui": true,
+        "async_pdf_vectorization": true,
+        "progress_telemetry_ui": true,
+        "batch_embedding_optimization": true,
+        "streaming_ingestion": true,
+        "hard_memory_cap": true,
+        "commander_tui_enabled": true,
+        "auto_port_clearing": true
     },
     "constraints": {
         "manifold_bounds": [

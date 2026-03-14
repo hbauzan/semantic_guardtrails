@@ -20,6 +20,10 @@ interface SemanticState {
     chatHistory: Array<{ role: string; content: string }>;
     chatImpactNode: any | null;
     firewallEnabled: boolean;
+    uploadStatus: number;
+    isProcessing: boolean;
+    currentTaskId: string | null;
+    ramUsageMb: number;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
@@ -38,6 +42,10 @@ interface SemanticState {
     setChatHistory: (history: Array<{ role: string; content: string }>) => void;
     setChatImpactNode: (node: any | null) => void;
     setFirewallEnabled: (enabled: boolean) => void;
+    setUploadStatus: (status: number) => void;
+    setIsProcessing: (processing: boolean) => void;
+    setCurrentTaskId: (id: string | null) => void;
+    setRamUsageMb: (mb: number) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -60,6 +68,10 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     chatHistory: [],
     chatImpactNode: null,
     firewallEnabled: false,
+    uploadStatus: 0,
+    isProcessing: false,
+    currentTaskId: null,
+    ramUsageMb: 0,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
@@ -78,4 +90,8 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     setChatHistory: (history) => set({ chatHistory: history }),
     setChatImpactNode: (node) => set({ chatImpactNode: node }),
     setFirewallEnabled: (enabled) => set({ firewallEnabled: enabled }),
+    setUploadStatus: (status) => set({ uploadStatus: status }),
+    setIsProcessing: (processing) => set({ isProcessing: processing }),
+    setCurrentTaskId: (id) => set({ currentTaskId: id }),
+    setRamUsageMb: (mb) => set({ ramUsageMb: mb }),
 }));

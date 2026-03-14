@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -10,6 +10,7 @@ import pyarrow as pa
 import pandas as pd
 import tempfile
 import json
+import uuid
 from pathlib import Path
 
 from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
@@ -60,10 +61,128 @@ class InjectPackRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     firewall_threshold: float
 
+# --- Search Models ---
 class ChatRequest(BaseModel):
     prompt: str
     model: str = "llama3.1"
     top_k: int = 3
+
+# --- Global Task Registry ---
+process_metadata: Dict[str, Any] = {}
+
+def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
+    try:
+        process_metadata[task_id]["status"] = "processing"
+        
+        import fitz
+        import psutil
+        import gc
+        
+        try:
+            doc = fitz.open(file_path)
+            total_pages = doc.page_count
+            doc.close()
+        except Exception:
+            total_pages = 1
+            
+        process_metadata[task_id]["total_chunks"] = total_pages
+        process_metadata[task_id]["processed_chunks"] = 0
+        process_metadata[task_id]["ram_usage_mb"] = 0
+        
+        ingestor = Ingestor()
+        chunk_generator = ingestor.load_file(file_path)
+        
+        df = knowledge_storage.get_all_vectors()
+        next_id = 20000
+        if not df.empty and 'id' in df.columns:
+            existing_ids = df['id'].tolist()
+            if existing_ids:
+                next_id = max(existing_ids) + 1
+        
+        batch_size = 10
+        batch_chunks = []
+        current_page = 0
+        
+        for chunk in chunk_generator:
+            # RSS Hard Cap Monitor
+            process = psutil.Process()
+            rss_bytes = process.memory_info().rss
+            ram_mb = rss_bytes / (1024 * 1024)
+            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
+            
+            if rss_bytes > (4 * 1024 * 1024 * 1024):
+                print(f"[CRITICAL_MEMORY_ABORT] Task {task_id} exceeded 4GB RAM threshold ({ram_mb:.0f} MB). Terminating.")
+                process_metadata[task_id]["status"] = "CRITICAL_MEMORY_ABORT"
+                return
+                
+            batch_chunks.append(chunk)
+            current_page = max(current_page, chunk.metadata.get("page", 1))
+            
+            if len(batch_chunks) >= batch_size:
+                db_items = []
+                for b_chunk in batch_chunks:
+                    vector = embedder.encode(b_chunk.text)
+                    item = DBItem(
+                        id=next_id,
+                        text=b_chunk.text,
+                        vector=vector.tolist(),
+                        metadata={"source": filename, **b_chunk.metadata},
+                        cluster_label="SOVEREIGN_KNOWLEDGE",
+                        cluster_id=-2
+                    )
+                    db_items.append(item)
+                    next_id += 1
+                
+                if db_items:
+                    knowledge_storage.add(db_items)
+                    
+                process_metadata[task_id]["processed_chunks"] = current_page
+                print(f"[PDF BATCH] Processed up to page {current_page}/{total_pages}. RAM: {ram_mb:.0f} MB")
+                
+                # Explicit memory purge
+                del db_items
+                del batch_chunks
+                batch_chunks = []
+                gc.collect()
+
+        # Final flush
+        if batch_chunks:
+            db_items = []
+            for b_chunk in batch_chunks:
+                vector = embedder.encode(b_chunk.text)
+                item = DBItem(
+                    id=next_id,
+                    text=b_chunk.text,
+                    vector=vector.tolist(),
+                    metadata={"source": filename, **b_chunk.metadata},
+                    cluster_label="SOVEREIGN_KNOWLEDGE",
+                    cluster_id=-2
+                )
+                db_items.append(item)
+                next_id += 1
+            if db_items:
+                knowledge_storage.add(db_items)
+                
+            process = psutil.Process()
+            ram_mb = process.memory_info().rss / (1024 * 1024)
+            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
+            process_metadata[task_id]["processed_chunks"] = total_pages
+            
+            del db_items
+            del batch_chunks
+            gc.collect()
+
+        process_metadata[task_id]["status"] = "completed"
+        
+    except Exception as e:
+        print(f"[PDF ERROR] Task {task_id} failed: {e}")
+        process_metadata[task_id]["status"] = "error"
+    finally:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except:
+            pass
 
 # --- Routes ---
 
@@ -130,6 +249,7 @@ async def chat_endpoint(
 
 @router.post("/corpus/upload-pdf")
 async def upload_pdf(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     embedder: Embedder = Depends(get_embedder),
     knowledge_storage: Storage = Depends(get_knowledge_storage)
@@ -139,38 +259,34 @@ async def upload_pdf(
             tmp.write(await file.read())
             tmp_path = Path(tmp.name)
             
-        ingestor = Ingestor()
-        chunks = ingestor.load_file(tmp_path)
+        task_id = str(uuid.uuid4())
         
-        db_items = []
-        df = knowledge_storage.get_all_vectors()
-        next_id = 20000
-        if not df.empty and 'id' in df.columns:
-            existing_ids = df['id'].tolist()
-            if existing_ids:
-                next_id = max(existing_ids) + 1
-                 
-        for chunk in chunks:
-            vector = embedder.encode(chunk.text)
-            item = DBItem(
-                id=next_id,
-                text=chunk.text,
-                vector=vector.tolist(),
-                metadata={"source": file.filename, **chunk.metadata},
-                cluster_label="SOVEREIGN_KNOWLEDGE",
-                cluster_id=-2
-            )
-            db_items.append(item)
-            next_id += 1
-            
-        if db_items:
-            knowledge_storage.add(db_items)
-            
-        tmp_path.unlink()
+        # Initialize registry state immediately
+        process_metadata[task_id] = {
+            "status": "processing",
+            "total_chunks": 0,
+            "processed_chunks": 0,
+            "ram_usage_mb": 0
+        }
         
-        return {"status": "success", "filename": file.filename, "chunks_ingested": len(db_items)}
+        background_tasks.add_task(
+            process_pdf_background,
+            task_id,
+            tmp_path,
+            file.filename,
+            embedder,
+            knowledge_storage
+        )
+        
+        return {"status": "success", "task_id": task_id, "filename": file.filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/corpus/task-status/{task_id}")
+async def task_status(task_id: str):
+    if task_id not in process_metadata:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return process_metadata[task_id]
 
 @router.post("/galaxy/simulate")
 async def simulate_query(

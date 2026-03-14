@@ -478,6 +478,13 @@ const ArithmeticHUD: React.FC = () => {
   const firewallThreshold = useSemanticStore((state) => state.firewallThreshold);
   const setFirewallThreshold = useSemanticStore((state) => state.setFirewallThreshold);
   const setIsTyping = useSemanticStore((state) => state.setIsTyping);
+  const uploadStatus = useSemanticStore((state) => state.uploadStatus);
+  const setUploadStatus = useSemanticStore((state) => state.setUploadStatus);
+  const isProcessing = useSemanticStore((state) => state.isProcessing);
+  const setIsProcessing = useSemanticStore((state) => state.setIsProcessing);
+  const setCurrentTaskId = useSemanticStore((state) => state.setCurrentTaskId);
+  const ramUsageMb = useSemanticStore((state) => state.ramUsageMb);
+  const setRamUsageMb = useSemanticStore((state) => state.setRamUsageMb);
 
   const colors = useSemanticStore((state) => state.colors);
   const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
@@ -534,7 +541,9 @@ const ArithmeticHUD: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setInjectorStatus('Vectorizing PDF...');
+    setInjectorStatus('Vectorizing PDF (Initiating)...');
+    setIsProcessing(true);
+    setUploadStatus(0);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -545,16 +554,59 @@ const ArithmeticHUD: React.FC = () => {
         body: formData
       });
       if (!res.ok) throw new Error('Failed to upload PDF');
-      setInjectorStatus('Knowledge Updated! Refreshing Radar...');
 
-      // Auto refresh the radar/HUD
-      setTimeout(() => {
-        calculate();
-        setShowInjector(false);
-        setInjectorStatus('');
-      }, 1500);
+      const data = await res.json();
+      const taskId = data.task_id;
+      setCurrentTaskId(taskId);
+      setInjectorStatus('Processing Vectors...');
+
+      const pollInterval = window.setInterval(async () => {
+        try {
+          const statusRes = await fetch(`http://127.0.0.1:8000/corpus/task-status/${taskId}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+
+            if (statusData.total_chunks > 0) {
+              const progress = Math.round((statusData.processed_chunks / statusData.total_chunks) * 100);
+              setUploadStatus(progress);
+            }
+            if (statusData.ram_usage_mb !== undefined) {
+              setRamUsageMb(statusData.ram_usage_mb);
+            }
+
+            if (statusData.status === 'completed') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('Knowledge Updated! Refreshing Radar...');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+
+              setTimeout(() => {
+                calculate();
+                setShowInjector(false);
+                setInjectorStatus('');
+                setUploadStatus(0);
+                setRamUsageMb(0);
+              }, 1500);
+            } else if (statusData.status === 'CRITICAL_MEMORY_ABORT') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('CRITICAL MEMORY ABORT: 4GB RAM Cap Exceeded');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+            } else if (statusData.status === 'error') {
+              window.clearInterval(pollInterval);
+              setInjectorStatus('Error processing PDF');
+              setIsProcessing(false);
+              setCurrentTaskId(null);
+            }
+          }
+        } catch (pollErr) {
+          console.error("Polling error", pollErr);
+        }
+      }, 500);
+
     } catch (err: any) {
       setInjectorStatus(`Error: ${err.message}`);
+      setIsProcessing(false);
     } finally {
       // Clear the input so the user can select the same file again if they want
       e.target.value = '';
@@ -846,16 +898,33 @@ const ArithmeticHUD: React.FC = () => {
               type="file"
               accept=".pdf"
               onChange={handleUploadPdf}
+              disabled={isProcessing}
               style={{
                 color: '#aaa',
                 fontFamily: 'monospace',
                 fontSize: '0.8rem',
-                cursor: 'pointer'
+                cursor: isProcessing ? 'not-allowed' : 'pointer'
               }}
             />
+            {isProcessing && (
+              <div style={{ marginTop: '10px', background: '#002222', borderRadius: '4px', height: '8px', width: '100%', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${uploadStatus}%`,
+                  background: '#00ffff',
+                  boxShadow: '0 0 10px #00ffff',
+                  transition: 'width 0.3s ease-out'
+                }} />
+              </div>
+            )}
+            {isProcessing && ramUsageMb > 0 && (
+              <div style={{ marginTop: '5px', color: '#ffcc00', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                Worker RAM: {ramUsageMb} MB
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
+            <span style={{ color: injectorStatus.includes('Error') || injectorStatus.includes('CRITICAL') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={() => setShowInjector(false)}
