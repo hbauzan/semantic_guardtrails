@@ -1,19 +1,25 @@
-from fastapi import APIRouter, Depends, Response, HTTPException
-from fastapi.responses import ORJSONResponse
+from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File
+from fastapi.responses import ORJSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import time
 import numpy as np
 import io
+import os
 import pyarrow as pa
 import pandas as pd
+import tempfile
+import json
+from pathlib import Path
 
-from app.core.dependencies import get_embedder, get_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
+from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
 from app.modules.embedder import Embedder
 from app.modules.storage import Storage, DBItem
+from app.modules.ingestor import Ingestor
 from app.modules.geometry import Geometry
 from app.modules.context_vault import ContextVault
 from app.modules.identity import IdentityResolver
+from app.modules.chat import ChatService
 from app.core.config import settings
 
 router = APIRouter(default_response_class=ORJSONResponse)
@@ -54,12 +60,117 @@ class InjectPackRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     firewall_threshold: float
 
+class ChatRequest(BaseModel):
+    prompt: str
+    model: str = "llama3.1"
+    top_k: int = 3
+
 # --- Routes ---
 
 @router.post("/galaxy/config")
 async def update_config(request: ConfigUpdateRequest):
     state.firewall_threshold = request.firewall_threshold
     return {"status": "success", "firewall_threshold": state.firewall_threshold}
+
+@router.post("/chat")
+async def chat_endpoint(
+    request: ChatRequest,
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    prompt_text = request.prompt
+    
+    # 1. Command Parser
+    if "[FW=ON]" in prompt_text:
+        state.firewall_enabled = True
+        prompt_text = prompt_text.replace("[FW=ON]", "").strip()
+    elif "[FW=OFF]" in prompt_text:
+        state.firewall_enabled = False
+        prompt_text = prompt_text.replace("[FW=OFF]", "").strip()
+        
+    # 2. Vectorize user prompt
+    vector = embedder.encode(prompt_text)
+    
+    # 3. Search Sovereign Knowledge
+    results = knowledge_storage.search(vector.tolist(), limit=request.top_k)
+    distance = 0.0
+    context_text = ""
+    
+    if results:
+        # Distance to closest node
+        distance = results[0]['_distance']
+        # Build context
+        context_chunks = [res['text'] for res in results]
+        context_text = "\n\n".join(context_chunks)
+        
+    # 4. L2 Semantic Firewall Interceptor
+    is_blocked = False
+    if state.firewall_enabled and results:
+        if distance > state.firewall_threshold:
+            is_blocked = True
+            
+    async def chat_generator():
+        yield json.dumps({
+            "type": "metadata",
+            "distance": distance,
+            "firewall_enabled": state.firewall_enabled,
+            "is_blocked": is_blocked,
+            "vector": vector.tolist()
+        }) + "\n"
+        
+        if is_blocked:
+            yield json.dumps({"type": "content", "text": "SECURITY BREACH: Query outside semantic manual bounds."}) + "\n"
+            return
+            
+        chat_service = ChatService()
+        async for chunk in chat_service.stream_chat(request.model, prompt_text, context_text):
+            yield json.dumps({"type": "content", "text": chunk}) + "\n"
+            
+    return StreamingResponse(chat_generator(), media_type="application/x-ndjson")
+
+@router.post("/corpus/upload-pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+            
+        ingestor = Ingestor()
+        chunks = ingestor.load_file(tmp_path)
+        
+        db_items = []
+        df = knowledge_storage.get_all_vectors()
+        next_id = 20000
+        if not df.empty and 'id' in df.columns:
+            existing_ids = df['id'].tolist()
+            if existing_ids:
+                next_id = max(existing_ids) + 1
+                 
+        for chunk in chunks:
+            vector = embedder.encode(chunk.text)
+            item = DBItem(
+                id=next_id,
+                text=chunk.text,
+                vector=vector.tolist(),
+                metadata={"source": file.filename, **chunk.metadata},
+                cluster_label="SOVEREIGN_KNOWLEDGE",
+                cluster_id=-2
+            )
+            db_items.append(item)
+            next_id += 1
+            
+        if db_items:
+            knowledge_storage.add(db_items)
+            
+        tmp_path.unlink()
+        
+        return {"status": "success", "filename": file.filename, "chunks_ingested": len(db_items)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/galaxy/simulate")
 async def simulate_query(

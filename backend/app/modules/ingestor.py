@@ -45,17 +45,18 @@ class Ingestor:
 
     def _load_pdf(self, file_path: Path) -> List[Chunk]:
         try:
-            import pypdf
+            import fitz # PyMuPDF
         except ImportError:
-            raise ImportError("pypdf is required for PDF ingestion. pip install pypdf")
+            raise ImportError("fitz (pymupdf) is required for PDF ingestion. pip install pymupdf")
         
-        reader = pypdf.PdfReader(file_path)
+        doc = fitz.open(file_path)
         chunks = []
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text()
+        for i, page in enumerate(doc):
+            text = page.get_text()
             if text:
                 curr_chunks = self._chunk_text(text, source=str(file_path), page=i+1)
                 chunks.extend(curr_chunks)
+        doc.close()
         return chunks
 
     def _chunk_text(self, text: str, **metadata) -> Generator[Chunk, None, None]:

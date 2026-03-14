@@ -25,13 +25,16 @@ class DBItem(BaseModel):
         return v
 
 class Storage:
-    def __init__(self, model_name: str, dimension: int):
+    def __init__(self, model_name: str, dimension: int, table_name: Optional[str] = None):
         self.uri = str(settings.LANCEDB_URI)
         self.db = lancedb.connect(self.uri)
         
-        # Dynamic Table Name: vectors_all_mpnet_base_v2_768
-        safe_name = model_name.replace("/", "_").replace("-", "_").replace(" ", "_")
-        self.table_name = f"vectors_{safe_name}_{dimension}"
+        if table_name:
+            self.table_name = table_name
+        else:
+            # Dynamic Table Name: vectors_all_mpnet_base_v2_768
+            safe_name = model_name.replace("/", "_").replace("-", "_").replace(" ", "_")
+            self.table_name = f"vectors_{safe_name}_{dimension}"
         self.dimension = dimension
         
         self._init_table()

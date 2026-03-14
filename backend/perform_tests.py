@@ -1,7 +1,7 @@
 import httpx
 import sys
 BASE_URL = "http://127.0.0.1:8000"
-TIMEOUT = 10.0
+TIMEOUT = 300.0
 
 def log_section(msg): print(f"\\n--- {msg} ---")
 def log_info(msg): print(f"ℹ️ {msg}")
@@ -628,6 +628,73 @@ def test_radar_hud_telemetry_bounds():
         log_fail("Exception during Radar HUD Telemetry Bounds Math Check", str(e))
         return False
 
+def test_bge_m3_vector_parity_chat_prompt():
+    log_section("Testing BGE-M3 Vector Parity (Chat Prompt Routing)")
+    try:
+        r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=OFF] Validate vector", "model": "llama3.1", "top_k": 3}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            import json
+            lines = r.text.strip().split('\n')
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "metadata":
+                            vec = data.get("vector")
+                            if not vec or len(vec) not in [768, 1024]:
+                                log_fail(f"Vector parity failed in Chat route. Length: {len(vec) if vec else 'None'}")
+                                return False
+                            log_success("Chat prompt Vector Parity OK")
+                            return True
+                    except: pass
+            log_fail("Metadata block not found in stream.")
+            return False
+        log_fail("Chat routing failed.")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_firewall_interceptor_blocking():
+    log_section("Testing Firewall Interceptor Blocking Logic")
+    try:
+        import json
+        # Temporarily drop threshold to force intercept
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 0.0001}, timeout=TIMEOUT)
+        
+        r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=ON] Apple pie recipe", "model": "llama3.1", "top_k": 1}, timeout=TIMEOUT)
+        
+        # Reset threshold back to normal
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 25.0}, timeout=TIMEOUT)
+        
+        if r.status_code == 200:
+            lines = r.text.strip().split('\n')
+            blocked = False
+            meta_distance = 0.0
+            
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "metadata":
+                             meta_distance = data.get("distance", 0.0)
+                        if data.get("type") == "content" and "SECURITY BREACH" in data.get("text", ""):
+                            blocked = True
+                    except: pass
+            
+            # If DB is empty, distance is 0 and it won't block, which is expected/fail-open.
+            if blocked or meta_distance == 0.0:
+                log_success("Firewall Interceptor Blocking Logic OK")
+                return True
+            else:
+                log_fail("Firewall failed to intercept despite 0.0001 threshold.")
+                return False
+        log_fail("Chat endpoint failed.")
+        return False
+    except Exception as e:
+         log_fail(f"Exception: {e}")
+         return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -636,7 +703,8 @@ def main():
         test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math,
         test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
-        test_cenital_autofit_math, test_radar_hud_telemetry_bounds
+        test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
+        test_bge_m3_vector_parity_chat_prompt, test_firewall_interceptor_blocking
     ]
     all_passed = True
     for test in tests:

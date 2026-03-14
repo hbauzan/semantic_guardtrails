@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-13 23:58:04.470187
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 17:35:28.245168
 
 
 ################################################################################
@@ -17,6 +17,11 @@ FILE: architecture_spec.md
 
 ## 3. Tooling
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
+
+## 4. Local RAG & Sovereign AI Engine
+* **Knowledge Ingestion (PyMuPDF):** Directly processes PDF documentation into `sovereign_knowledge` LanceDB table.
+* **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.
+* **L2 Semantic Firewall Interceptor:** Evaluates inbound chat prompts against the `sovereign_knowledge` vectors using Euclidean Distance ($D_n$). Intercepts and blocks responses if divergence threshold is exceeded and `[FW=ON]` is active.
 
 ## 6. Current Flight Status
 ### Navigation & Flight Mechanics
@@ -105,7 +110,11 @@ FILE: manifest.json
         "is_typing_focus_lock": true,
         "deterministic_auto_fit": true,
         "r3f_namespace_fix": true,
-        "pointer_lock_gesture_enforced": true
+        "pointer_lock_gesture_enforced": true,
+        "local_rag_enabled": true,
+        "ollama_integration": true,
+        "pdf_ingest": true,
+        "pdf_upload_ui": true
     },
     "constraints": {
         "manifold_bounds": [
@@ -182,22 +191,28 @@ if __name__ == "__main__":
 FILE: backend/app/api/routes.py
 ################################################################################
 
-from fastapi import APIRouter, Depends, Response, HTTPException
-from fastapi.responses import ORJSONResponse
+from fastapi import APIRouter, Depends, Response, HTTPException, UploadFile, File
+from fastapi.responses import ORJSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import time
 import numpy as np
 import io
+import os
 import pyarrow as pa
 import pandas as pd
+import tempfile
+import json
+from pathlib import Path
 
-from app.core.dependencies import get_embedder, get_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
+from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
 from app.modules.embedder import Embedder
 from app.modules.storage import Storage, DBItem
+from app.modules.ingestor import Ingestor
 from app.modules.geometry import Geometry
 from app.modules.context_vault import ContextVault
 from app.modules.identity import IdentityResolver
+from app.modules.chat import ChatService
 from app.core.config import settings
 
 router = APIRouter(default_response_class=ORJSONResponse)
@@ -238,12 +253,117 @@ class InjectPackRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     firewall_threshold: float
 
+class ChatRequest(BaseModel):
+    prompt: str
+    model: str = "llama3.1"
+    top_k: int = 3
+
 # --- Routes ---
 
 @router.post("/galaxy/config")
 async def update_config(request: ConfigUpdateRequest):
     state.firewall_threshold = request.firewall_threshold
     return {"status": "success", "firewall_threshold": state.firewall_threshold}
+
+@router.post("/chat")
+async def chat_endpoint(
+    request: ChatRequest,
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    prompt_text = request.prompt
+    
+    # 1. Command Parser
+    if "[FW=ON]" in prompt_text:
+        state.firewall_enabled = True
+        prompt_text = prompt_text.replace("[FW=ON]", "").strip()
+    elif "[FW=OFF]" in prompt_text:
+        state.firewall_enabled = False
+        prompt_text = prompt_text.replace("[FW=OFF]", "").strip()
+        
+    # 2. Vectorize user prompt
+    vector = embedder.encode(prompt_text)
+    
+    # 3. Search Sovereign Knowledge
+    results = knowledge_storage.search(vector.tolist(), limit=request.top_k)
+    distance = 0.0
+    context_text = ""
+    
+    if results:
+        # Distance to closest node
+        distance = results[0]['_distance']
+        # Build context
+        context_chunks = [res['text'] for res in results]
+        context_text = "\n\n".join(context_chunks)
+        
+    # 4. L2 Semantic Firewall Interceptor
+    is_blocked = False
+    if state.firewall_enabled and results:
+        if distance > state.firewall_threshold:
+            is_blocked = True
+            
+    async def chat_generator():
+        yield json.dumps({
+            "type": "metadata",
+            "distance": distance,
+            "firewall_enabled": state.firewall_enabled,
+            "is_blocked": is_blocked,
+            "vector": vector.tolist()
+        }) + "\n"
+        
+        if is_blocked:
+            yield json.dumps({"type": "content", "text": "SECURITY BREACH: Query outside semantic manual bounds."}) + "\n"
+            return
+            
+        chat_service = ChatService()
+        async for chunk in chat_service.stream_chat(request.model, prompt_text, context_text):
+            yield json.dumps({"type": "content", "text": chunk}) + "\n"
+            
+    return StreamingResponse(chat_generator(), media_type="application/x-ndjson")
+
+@router.post("/corpus/upload-pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+            
+        ingestor = Ingestor()
+        chunks = ingestor.load_file(tmp_path)
+        
+        db_items = []
+        df = knowledge_storage.get_all_vectors()
+        next_id = 20000
+        if not df.empty and 'id' in df.columns:
+            existing_ids = df['id'].tolist()
+            if existing_ids:
+                next_id = max(existing_ids) + 1
+                 
+        for chunk in chunks:
+            vector = embedder.encode(chunk.text)
+            item = DBItem(
+                id=next_id,
+                text=chunk.text,
+                vector=vector.tolist(),
+                metadata={"source": file.filename, **chunk.metadata},
+                cluster_label="SOVEREIGN_KNOWLEDGE",
+                cluster_id=-2
+            )
+            db_items.append(item)
+            next_id += 1
+            
+        if db_items:
+            knowledge_storage.add(db_items)
+            
+        tmp_path.unlink()
+        
+        return {"status": "success", "filename": file.filename, "chunks_ingested": len(db_items)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/galaxy/simulate")
 async def simulate_query(
@@ -1019,6 +1139,7 @@ pandas>=2.0.0
 pylance>=0.10.0
 plotly>=5.18.0
 rich>=13.0.0
+pymupdf>=1.23.0
 
 ################################################################################
 FILE: frontend/package.json
@@ -1085,13 +1206,16 @@ class DBItem(BaseModel):
         return v
 
 class Storage:
-    def __init__(self, model_name: str, dimension: int):
+    def __init__(self, model_name: str, dimension: int, table_name: Optional[str] = None):
         self.uri = str(settings.LANCEDB_URI)
         self.db = lancedb.connect(self.uri)
         
-        # Dynamic Table Name: vectors_all_mpnet_base_v2_768
-        safe_name = model_name.replace("/", "_").replace("-", "_").replace(" ", "_")
-        self.table_name = f"vectors_{safe_name}_{dimension}"
+        if table_name:
+            self.table_name = table_name
+        else:
+            # Dynamic Table Name: vectors_all_mpnet_base_v2_768
+            safe_name = model_name.replace("/", "_").replace("-", "_").replace(" ", "_")
+            self.table_name = f"vectors_{safe_name}_{dimension}"
         self.dimension = dimension
         
         self._init_table()
@@ -1621,12 +1745,14 @@ import pandas as pd
 class GlobalState:
     embedder: Embedder = None
     storage: Storage = None
+    knowledge_storage: Storage = None
     geometry: Geometry = None
     context_vault: ContextVault = None
     # Cache for the Galaxy View / Probe
     galaxy_cache: pd.DataFrame = None 
     identity_resolver: "IdentityResolver" = None 
     firewall_threshold: float = 0.45 
+    firewall_enabled: bool = False
 
 state = GlobalState()
 
@@ -1646,6 +1772,16 @@ def get_storage() -> Storage:
             dimension=embedder.dimension
         )
     return state.storage
+
+def get_knowledge_storage() -> Storage:
+    if not state.knowledge_storage:
+        embedder = get_embedder()
+        state.knowledge_storage = Storage(
+            model_name=embedder.model_name,
+            dimension=embedder.dimension,
+            table_name="sovereign_knowledge"
+        )
+    return state.knowledge_storage
 
 def get_context_vault() -> ContextVault:
     if not state.context_vault:
@@ -2032,17 +2168,18 @@ class Ingestor:
 
     def _load_pdf(self, file_path: Path) -> List[Chunk]:
         try:
-            import pypdf
+            import fitz # PyMuPDF
         except ImportError:
-            raise ImportError("pypdf is required for PDF ingestion. pip install pypdf")
+            raise ImportError("fitz (pymupdf) is required for PDF ingestion. pip install pymupdf")
         
-        reader = pypdf.PdfReader(file_path)
+        doc = fitz.open(file_path)
         chunks = []
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text()
+        for i, page in enumerate(doc):
+            text = page.get_text()
             if text:
                 curr_chunks = self._chunk_text(text, source=str(file_path), page=i+1)
                 chunks.extend(curr_chunks)
+        doc.close()
         return chunks
 
     def _chunk_text(self, text: str, **metadata) -> Generator[Chunk, None, None]:
@@ -2282,7 +2419,7 @@ FILE: backend/perform_tests.py
 import httpx
 import sys
 BASE_URL = "http://127.0.0.1:8000"
-TIMEOUT = 10.0
+TIMEOUT = 300.0
 
 def log_section(msg): print(f"\\n--- {msg} ---")
 def log_info(msg): print(f"ℹ️ {msg}")
@@ -2909,6 +3046,73 @@ def test_radar_hud_telemetry_bounds():
         log_fail("Exception during Radar HUD Telemetry Bounds Math Check", str(e))
         return False
 
+def test_bge_m3_vector_parity_chat_prompt():
+    log_section("Testing BGE-M3 Vector Parity (Chat Prompt Routing)")
+    try:
+        r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=OFF] Validate vector", "model": "llama3.1", "top_k": 3}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            import json
+            lines = r.text.strip().split('\n')
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "metadata":
+                            vec = data.get("vector")
+                            if not vec or len(vec) not in [768, 1024]:
+                                log_fail(f"Vector parity failed in Chat route. Length: {len(vec) if vec else 'None'}")
+                                return False
+                            log_success("Chat prompt Vector Parity OK")
+                            return True
+                    except: pass
+            log_fail("Metadata block not found in stream.")
+            return False
+        log_fail("Chat routing failed.")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_firewall_interceptor_blocking():
+    log_section("Testing Firewall Interceptor Blocking Logic")
+    try:
+        import json
+        # Temporarily drop threshold to force intercept
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 0.0001}, timeout=TIMEOUT)
+        
+        r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=ON] Apple pie recipe", "model": "llama3.1", "top_k": 1}, timeout=TIMEOUT)
+        
+        # Reset threshold back to normal
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 25.0}, timeout=TIMEOUT)
+        
+        if r.status_code == 200:
+            lines = r.text.strip().split('\n')
+            blocked = False
+            meta_distance = 0.0
+            
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "metadata":
+                             meta_distance = data.get("distance", 0.0)
+                        if data.get("type") == "content" and "SECURITY BREACH" in data.get("text", ""):
+                            blocked = True
+                    except: pass
+            
+            # If DB is empty, distance is 0 and it won't block, which is expected/fail-open.
+            if blocked or meta_distance == 0.0:
+                log_success("Firewall Interceptor Blocking Logic OK")
+                return True
+            else:
+                log_fail("Firewall failed to intercept despite 0.0001 threshold.")
+                return False
+        log_fail("Chat endpoint failed.")
+        return False
+    except Exception as e:
+         log_fail(f"Exception: {e}")
+         return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -2917,7 +3121,8 @@ def main():
         test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math,
         test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
-        test_cenital_autofit_math, test_radar_hud_telemetry_bounds
+        test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
+        test_bge_m3_vector_parity_chat_prompt, test_firewall_interceptor_blocking
     ]
     all_passed = True
     for test in tests:
@@ -3300,6 +3505,9 @@ if [ ! -z "$PID" ]; then
     sleep 1
 fi
 echo "👁️ Deep Observability Active. Infinite View & Crosshair Online."
+echo "🤖 Checking Sovereign Ollama Motor..."
+"$PROJECT_ROOT/sovereign.sh" check || echo "⚠️ Proceeding without Ollama. RAG may fail."
+
 echo "🚀 Iniciando Semantic Guardrails Backend"
 source "$PROJECT_ROOT/sg_env/bin/activate"
 export PYTHONPATH="$PYTHONPATH:$PROJECT_ROOT/backend"
@@ -3336,6 +3544,9 @@ rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
 rm -rf "$PROJECT_ROOT/frontend/dist"
 
 echo "👁️ Deep Observability Testing Initialized."
+echo "🤖 Checking Sovereign Ollama Motor..."
+"$PROJECT_ROOT/sovereign.sh" check || echo "⚠️ Proceeding without Ollama. RAG tests may fail."
+
 source "$PROJECT_ROOT/sg_env/bin/activate"
 export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
 python3 backend/perform_tests.py
@@ -3587,6 +3798,7 @@ import { Sphere, Text, PointerLockControls, Billboard, Ring } from '@react-three
 import * as THREE from 'three';
 import { useKeyboardControls } from '../hooks/useKeyboardControls';
 import { SemanticThread } from './SemanticThread';
+import { ChatHUD } from './ChatHUD';
 import { useSemanticStore } from '../store';
 
 const FlightControls: React.FC = () => {
@@ -3632,7 +3844,9 @@ const FlightControls: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleFocus);
   }, []);
 
-  // We explicitly disable auto-enabling in PointerLockControls to manage it manually via the click listener above.
+  // We explicitly manage PointerLockControls by keeping it enabled for mouse movement,
+  // but we prevent its default spammy auto-lock by passing a non-existent selector.
+  const isTyping = useSemanticStore(state => state.isTyping);
 
   useFrame((state, delta) => {
     // 1. Inertia (Damping)
@@ -3673,8 +3887,9 @@ const FlightControls: React.FC = () => {
     state.camera.position.add(velocity.current);
   });
 
-  // Set enabled false so it doesn't try to lock automatically, we handle it explicitly.
-  return <PointerLockControls ref={controlsRef} makeDefault enabled={false} />;
+  // enabled={!isTyping} allows mouse movement when not typing
+  // selector="#prevent-default-click" ensures Drei doesn't bind its own click listener to document
+  return <PointerLockControls ref={controlsRef} makeDefault enabled={!isTyping} selector="#prevent-default-click" />;
 };
 
 type NodeData = {
@@ -4064,6 +4279,7 @@ const ArithmeticHUD: React.FC = () => {
   const topResults = useSemanticStore((state) => state.results);
   const setResults = useSemanticStore((state) => state.setResults);
   const selectedThread = useSemanticStore(state => state.selectedThread);
+  const chatImpactNode = useSemanticStore(state => state.chatImpactNode);
 
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -4105,6 +4321,37 @@ const ArithmeticHUD: React.FC = () => {
       }, 1500);
     } catch (err: any) {
       setInjectorStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleUploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setInjectorStatus('Vectorizing PDF...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/corpus/upload-pdf', {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Failed to upload PDF');
+      setInjectorStatus('Knowledge Updated! Refreshing Radar...');
+
+      // Auto refresh the radar/HUD
+      setTimeout(() => {
+        calculate();
+        setShowInjector(false);
+        setInjectorStatus('');
+      }, 1500);
+    } catch (err: any) {
+      setInjectorStatus(`Error: ${err.message}`);
+    } finally {
+      // Clear the input so the user can select the same file again if they want
+      e.target.value = '';
     }
   };
 
@@ -4236,6 +4483,41 @@ const ArithmeticHUD: React.FC = () => {
     return Math.sqrt(diffSquaredSum);
   }, [selectedThread, nodes]);
 
+  const displayNodes = React.useMemo(() => {
+    let result = [...nodes];
+    if (chatImpactNode && nodes.length > 0 && nodes[0].vector) {
+      const vA = nodes[0].vector;
+      const magA = getVectorMagnitude(vA);
+      const vecN = chatImpactNode.vector;
+      const magN = getVectorMagnitude(vecN);
+      let dn = 0;
+      if (magA > 0 && magN > 0) {
+        const diffSquaredSum = vA.reduce((sum, val, idx) => {
+          const diff = val - (vecN[idx] || 0);
+          return sum + (diff * diff);
+        }, 0);
+        dn = Math.sqrt(diffSquaredSum);
+      }
+      const angle = Math.atan2(vecN[2], vecN[0]);
+      const BASE_SPREAD = 50.0;
+
+      const pos = [
+        Math.cos(angle) * dn * uiScaleFactor * BASE_SPREAD,
+        0,
+        Math.sin(angle) * dn * uiScaleFactor * BASE_SPREAD
+      ] as [number, number, number];
+
+      result.push({
+        word: chatImpactNode.word,
+        position: pos,
+        color: chatImpactNode.color,
+        vector: vecN,
+        token_id: Math.random()
+      });
+    }
+    return result;
+  }, [nodes, chatImpactNode, uiScaleFactor]);
+
   // Firewall Status Check
   const firewallStatus = React.useMemo(() => {
     if (nodes.length < 2 || !nodes[0].vector || !nodes[1].vector) return null;
@@ -4256,9 +4538,10 @@ const ArithmeticHUD: React.FC = () => {
 
   return (
     <>
-      <TelemetryHUD nodesCount={nodes.length > 0 ? nodes.length * 1024 : 0} xStretch={xStretch} />
+      <TelemetryHUD nodesCount={displayNodes.length > 0 ? displayNodes.length * 1024 : 0} xStretch={xStretch} />
       <CrosshairHUD />
       <TargetingHUD />
+      <ChatHUD />
 
       {/* L2 Analysis Panel */}
       {selectedThread && selectedDnRaw !== null && (
@@ -4299,9 +4582,9 @@ const ArithmeticHUD: React.FC = () => {
             {/* Noise Delta Map */}
             <div style={{ marginTop: '10px' }}>
               <div style={{ color: '#ffea00', fontSize: '0.85rem', marginBottom: '5px', textTransform: 'uppercase', fontWeight: 'bold' }}>Noise Vectors (Delta &gt; 0.2)</div>
-              {nodes.length > 0 && nodes[0].vector && selectedThread.vector ? (
+              {displayNodes.length > 0 && displayNodes[0].vector && selectedThread.vector ? (
                 (() => {
-                  const vA = nodes[0].vector;
+                  const vA = displayNodes[0].vector;
                   const vN = selectedThread.vector;
                   const diffs = vA.map((val: number, idx: number) => ({ index: idx, delta: Math.abs(val - (vN[idx] || 0)) }))
                     .filter((d: { delta: number }) => d.delta > 0.2)
@@ -4349,8 +4632,22 @@ const ArithmeticHUD: React.FC = () => {
             onBlur={() => setIsTyping(false)}
             onChange={(e) => setInjectorText(e.target.value)}
             placeholder="Term : A comprehensive description."
-            style={{ width: '100%', height: '150px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
+            style={{ width: '100%', height: '100px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
           />
+          <div style={{ padding: '10px', border: '1px dashed #005555', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.5)' }}>
+            <span style={{ color: '#00ffff', fontSize: '0.8rem', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Physical Knowledge Ingestion (PDF)</span>
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handleUploadPdf}
+              style={{
+                color: '#aaa',
+                fontFamily: 'monospace',
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+            />
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -4592,7 +4889,7 @@ const ArithmeticHUD: React.FC = () => {
       {/* 3D Canvas */}
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
-        <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
+        <ProbeSystem nodes={displayNodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
         <CameraAutoFit maxRadius={cameraMaxRadius} onComplete={() => setCameraMaxRadius(null)} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
@@ -4614,11 +4911,11 @@ const ArithmeticHUD: React.FC = () => {
         </group>
 
         {/* Render nodes and text */}
-        {nodes.map((node, i) => {
+        {displayNodes.map((node, i) => {
           // Word A defaults to [0, 0, 0], others calculate Radial Cosine Distance.
           let pos = [0, 0, 0] as [number, number, number];
           if (i > 0 && node.vector && node.vector.length > 0) {
-            const vA = nodes[0]?.vector || [];
+            const vA = displayNodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
             let dn = 0;
@@ -4664,13 +4961,13 @@ const ArithmeticHUD: React.FC = () => {
         })}
 
         {/* Semantic Ribbon Traces */}
-        {nodes.map((node, i) => {
+        {displayNodes.map((node, i) => {
           if (!node.vector || node.vector.length === 0) return null;
 
           // Radial Cosine Distance Calculation for Threads
           let pos = [0, 0, 0] as [number, number, number];
           if (i > 0 && node.vector && node.vector.length > 0) {
-            const vA = nodes[0]?.vector || [];
+            const vA = displayNodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
             let dn = 0;
@@ -4704,6 +5001,11 @@ const ArithmeticHUD: React.FC = () => {
             threadIsBlocked = firewallStatus.isBlocked;
           }
 
+          if (chatImpactNode && i === displayNodes.length - 1) {
+            threadIsBlocked = chatImpactNode.is_blocked;
+            labelText = `${node.word} [CHAT PROMPT]`;
+          }
+
           return (
             <group key={`ribbon-${node.token_id || i}`} position={pos}>
               <Billboard position={[-(512 * xStretch) - 20, 0, 0]}>
@@ -4729,7 +5031,7 @@ const ArithmeticHUD: React.FC = () => {
       </Canvas>
 
       {/* Radar Map Overlay - Relocated to standard HTML DOM overlay */}
-      <RadarHUD maxRadius={cameraMaxRadius} nodes={nodes} />
+      <RadarHUD maxRadius={cameraMaxRadius} nodes={displayNodes} />
     </>
   );
 };
@@ -4805,6 +5107,10 @@ interface SemanticState {
     stressTestQuery: string;
     firewallThreshold: number;
     isTyping: boolean;
+    isChatVisible: boolean;
+    chatHistory: Array<{ role: string; content: string }>;
+    chatImpactNode: any | null;
+    firewallEnabled: boolean;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
@@ -4819,6 +5125,10 @@ interface SemanticState {
     setStressTestQuery: (query: string) => void;
     setFirewallThreshold: (threshold: number) => void;
     setIsTyping: (typing: boolean) => void;
+    setIsChatVisible: (visible: boolean) => void;
+    setChatHistory: (history: Array<{ role: string; content: string }>) => void;
+    setChatImpactNode: (node: any | null) => void;
+    setFirewallEnabled: (enabled: boolean) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -4837,6 +5147,10 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     stressTestQuery: '',
     firewallThreshold: 25.0,
     isTyping: false,
+    isChatVisible: false,
+    chatHistory: [],
+    chatImpactNode: null,
+    firewallEnabled: false,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
@@ -4851,4 +5165,8 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     setStressTestQuery: (query) => set({ stressTestQuery: query }),
     setFirewallThreshold: (val) => set({ firewallThreshold: val }),
     setIsTyping: (typing) => set({ isTyping: typing }),
+    setIsChatVisible: (visible) => set({ isChatVisible: visible }),
+    setChatHistory: (history) => set({ chatHistory: history }),
+    setChatImpactNode: (node) => set({ chatImpactNode: node }),
+    setFirewallEnabled: (enabled) => set({ firewallEnabled: enabled }),
 }));

@@ -43,7 +43,11 @@
         "is_typing_focus_lock": true,
         "deterministic_auto_fit": true,
         "r3f_namespace_fix": true,
-        "pointer_lock_gesture_enforced": true
+        "pointer_lock_gesture_enforced": true,
+        "local_rag_enabled": true,
+        "ollama_integration": true,
+        "pdf_ingest": true,
+        "pdf_upload_ui": true
     },
     "constraints": {
         "manifold_bounds": [

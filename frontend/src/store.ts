@@ -16,6 +16,10 @@ interface SemanticState {
     stressTestQuery: string;
     firewallThreshold: number;
     isTyping: boolean;
+    isChatVisible: boolean;
+    chatHistory: Array<{ role: string; content: string }>;
+    chatImpactNode: any | null;
+    firewallEnabled: boolean;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
@@ -30,6 +34,10 @@ interface SemanticState {
     setStressTestQuery: (query: string) => void;
     setFirewallThreshold: (threshold: number) => void;
     setIsTyping: (typing: boolean) => void;
+    setIsChatVisible: (visible: boolean) => void;
+    setChatHistory: (history: Array<{ role: string; content: string }>) => void;
+    setChatImpactNode: (node: any | null) => void;
+    setFirewallEnabled: (enabled: boolean) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -48,6 +56,10 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     stressTestQuery: '',
     firewallThreshold: 25.0,
     isTyping: false,
+    isChatVisible: false,
+    chatHistory: [],
+    chatImpactNode: null,
+    firewallEnabled: false,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
@@ -62,4 +74,8 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     setStressTestQuery: (query) => set({ stressTestQuery: query }),
     setFirewallThreshold: (val) => set({ firewallThreshold: val }),
     setIsTyping: (typing) => set({ isTyping: typing }),
+    setIsChatVisible: (visible) => set({ isChatVisible: visible }),
+    setChatHistory: (history) => set({ chatHistory: history }),
+    setChatImpactNode: (node) => set({ chatImpactNode: node }),
+    setFirewallEnabled: (enabled) => set({ firewallEnabled: enabled }),
 }));

@@ -18,3 +18,4 @@ pandas>=2.0.0
 pylance>=0.10.0
 plotly>=5.18.0
 rich>=13.0.0
+pymupdf>=1.23.0

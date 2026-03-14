@@ -4,6 +4,7 @@ import { Sphere, Text, PointerLockControls, Billboard, Ring } from '@react-three
 import * as THREE from 'three';
 import { useKeyboardControls } from '../hooks/useKeyboardControls';
 import { SemanticThread } from './SemanticThread';
+import { ChatHUD } from './ChatHUD';
 import { useSemanticStore } from '../store';
 
 const FlightControls: React.FC = () => {
@@ -484,6 +485,7 @@ const ArithmeticHUD: React.FC = () => {
   const topResults = useSemanticStore((state) => state.results);
   const setResults = useSemanticStore((state) => state.setResults);
   const selectedThread = useSemanticStore(state => state.selectedThread);
+  const chatImpactNode = useSemanticStore(state => state.chatImpactNode);
 
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -525,6 +527,37 @@ const ArithmeticHUD: React.FC = () => {
       }, 1500);
     } catch (err: any) {
       setInjectorStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleUploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setInjectorStatus('Vectorizing PDF...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/corpus/upload-pdf', {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Failed to upload PDF');
+      setInjectorStatus('Knowledge Updated! Refreshing Radar...');
+
+      // Auto refresh the radar/HUD
+      setTimeout(() => {
+        calculate();
+        setShowInjector(false);
+        setInjectorStatus('');
+      }, 1500);
+    } catch (err: any) {
+      setInjectorStatus(`Error: ${err.message}`);
+    } finally {
+      // Clear the input so the user can select the same file again if they want
+      e.target.value = '';
     }
   };
 
@@ -656,6 +689,41 @@ const ArithmeticHUD: React.FC = () => {
     return Math.sqrt(diffSquaredSum);
   }, [selectedThread, nodes]);
 
+  const displayNodes = React.useMemo(() => {
+    let result = [...nodes];
+    if (chatImpactNode && nodes.length > 0 && nodes[0].vector) {
+      const vA = nodes[0].vector;
+      const magA = getVectorMagnitude(vA);
+      const vecN = chatImpactNode.vector;
+      const magN = getVectorMagnitude(vecN);
+      let dn = 0;
+      if (magA > 0 && magN > 0) {
+        const diffSquaredSum = vA.reduce((sum, val, idx) => {
+          const diff = val - (vecN[idx] || 0);
+          return sum + (diff * diff);
+        }, 0);
+        dn = Math.sqrt(diffSquaredSum);
+      }
+      const angle = Math.atan2(vecN[2], vecN[0]);
+      const BASE_SPREAD = 50.0;
+
+      const pos = [
+        Math.cos(angle) * dn * uiScaleFactor * BASE_SPREAD,
+        0,
+        Math.sin(angle) * dn * uiScaleFactor * BASE_SPREAD
+      ] as [number, number, number];
+
+      result.push({
+        word: chatImpactNode.word,
+        position: pos,
+        color: chatImpactNode.color,
+        vector: vecN,
+        token_id: Math.random()
+      });
+    }
+    return result;
+  }, [nodes, chatImpactNode, uiScaleFactor]);
+
   // Firewall Status Check
   const firewallStatus = React.useMemo(() => {
     if (nodes.length < 2 || !nodes[0].vector || !nodes[1].vector) return null;
@@ -676,9 +744,10 @@ const ArithmeticHUD: React.FC = () => {
 
   return (
     <>
-      <TelemetryHUD nodesCount={nodes.length > 0 ? nodes.length * 1024 : 0} xStretch={xStretch} />
+      <TelemetryHUD nodesCount={displayNodes.length > 0 ? displayNodes.length * 1024 : 0} xStretch={xStretch} />
       <CrosshairHUD />
       <TargetingHUD />
+      <ChatHUD />
 
       {/* L2 Analysis Panel */}
       {selectedThread && selectedDnRaw !== null && (
@@ -719,9 +788,9 @@ const ArithmeticHUD: React.FC = () => {
             {/* Noise Delta Map */}
             <div style={{ marginTop: '10px' }}>
               <div style={{ color: '#ffea00', fontSize: '0.85rem', marginBottom: '5px', textTransform: 'uppercase', fontWeight: 'bold' }}>Noise Vectors (Delta &gt; 0.2)</div>
-              {nodes.length > 0 && nodes[0].vector && selectedThread.vector ? (
+              {displayNodes.length > 0 && displayNodes[0].vector && selectedThread.vector ? (
                 (() => {
-                  const vA = nodes[0].vector;
+                  const vA = displayNodes[0].vector;
                   const vN = selectedThread.vector;
                   const diffs = vA.map((val: number, idx: number) => ({ index: idx, delta: Math.abs(val - (vN[idx] || 0)) }))
                     .filter((d: { delta: number }) => d.delta > 0.2)
@@ -769,8 +838,22 @@ const ArithmeticHUD: React.FC = () => {
             onBlur={() => setIsTyping(false)}
             onChange={(e) => setInjectorText(e.target.value)}
             placeholder="Term : A comprehensive description."
-            style={{ width: '100%', height: '150px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
+            style={{ width: '100%', height: '100px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
           />
+          <div style={{ padding: '10px', border: '1px dashed #005555', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.5)' }}>
+            <span style={{ color: '#00ffff', fontSize: '0.8rem', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Physical Knowledge Ingestion (PDF)</span>
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handleUploadPdf}
+              style={{
+                color: '#aaa',
+                fontFamily: 'monospace',
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+            />
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -1012,7 +1095,7 @@ const ArithmeticHUD: React.FC = () => {
       {/* 3D Canvas */}
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
-        <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
+        <ProbeSystem nodes={displayNodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
         <CameraAutoFit maxRadius={cameraMaxRadius} onComplete={() => setCameraMaxRadius(null)} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
@@ -1034,11 +1117,11 @@ const ArithmeticHUD: React.FC = () => {
         </group>
 
         {/* Render nodes and text */}
-        {nodes.map((node, i) => {
+        {displayNodes.map((node, i) => {
           // Word A defaults to [0, 0, 0], others calculate Radial Cosine Distance.
           let pos = [0, 0, 0] as [number, number, number];
           if (i > 0 && node.vector && node.vector.length > 0) {
-            const vA = nodes[0]?.vector || [];
+            const vA = displayNodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
             let dn = 0;
@@ -1084,13 +1167,13 @@ const ArithmeticHUD: React.FC = () => {
         })}
 
         {/* Semantic Ribbon Traces */}
-        {nodes.map((node, i) => {
+        {displayNodes.map((node, i) => {
           if (!node.vector || node.vector.length === 0) return null;
 
           // Radial Cosine Distance Calculation for Threads
           let pos = [0, 0, 0] as [number, number, number];
           if (i > 0 && node.vector && node.vector.length > 0) {
-            const vA = nodes[0]?.vector || [];
+            const vA = displayNodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
             let dn = 0;
@@ -1124,6 +1207,11 @@ const ArithmeticHUD: React.FC = () => {
             threadIsBlocked = firewallStatus.isBlocked;
           }
 
+          if (chatImpactNode && i === displayNodes.length - 1) {
+            threadIsBlocked = chatImpactNode.is_blocked;
+            labelText = `${node.word} [CHAT PROMPT]`;
+          }
+
           return (
             <group key={`ribbon-${node.token_id || i}`} position={pos}>
               <Billboard position={[-(512 * xStretch) - 20, 0, 0]}>
@@ -1149,7 +1237,7 @@ const ArithmeticHUD: React.FC = () => {
       </Canvas>
 
       {/* Radar Map Overlay - Relocated to standard HTML DOM overlay */}
-      <RadarHUD maxRadius={cameraMaxRadius} nodes={nodes} />
+      <RadarHUD maxRadius={cameraMaxRadius} nodes={displayNodes} />
     </>
   );
 };

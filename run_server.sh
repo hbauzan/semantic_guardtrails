@@ -16,6 +16,9 @@ if [ ! -z "$PID" ]; then
     sleep 1
 fi
 echo "👁️ Deep Observability Active. Infinite View & Crosshair Online."
+echo "🤖 Checking Sovereign Ollama Motor..."
+"$PROJECT_ROOT/sovereign.sh" check || echo "⚠️ Proceeding without Ollama. RAG may fail."
+
 echo "🚀 Iniciando Semantic Guardrails Backend"
 source "$PROJECT_ROOT/sg_env/bin/activate"
 export PYTHONPATH="$PYTHONPATH:$PROJECT_ROOT/backend"

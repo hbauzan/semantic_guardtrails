@@ -11,6 +11,11 @@
 ## 3. Tooling
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
 
+## 4. Local RAG & Sovereign AI Engine
+* **Knowledge Ingestion (PyMuPDF):** Directly processes PDF documentation into `sovereign_knowledge` LanceDB table.
+* **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.
+* **L2 Semantic Firewall Interceptor:** Evaluates inbound chat prompts against the `sovereign_knowledge` vectors using Euclidean Distance ($D_n$). Intercepts and blocks responses if divergence threshold is exceeded and `[FW=ON]` is active.
+
 ## 6. Current Flight Status
 ### Navigation & Flight Mechanics
 *   **Smooth Flight**: Inertia-based camera movement with drag damping (AWSD + QE).

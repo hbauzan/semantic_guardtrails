@@ -7,12 +7,14 @@ import pandas as pd
 class GlobalState:
     embedder: Embedder = None
     storage: Storage = None
+    knowledge_storage: Storage = None
     geometry: Geometry = None
     context_vault: ContextVault = None
     # Cache for the Galaxy View / Probe
     galaxy_cache: pd.DataFrame = None 
     identity_resolver: "IdentityResolver" = None 
     firewall_threshold: float = 0.45 
+    firewall_enabled: bool = False
 
 state = GlobalState()
 
@@ -32,6 +34,16 @@ def get_storage() -> Storage:
             dimension=embedder.dimension
         )
     return state.storage
+
+def get_knowledge_storage() -> Storage:
+    if not state.knowledge_storage:
+        embedder = get_embedder()
+        state.knowledge_storage = Storage(
+            model_name=embedder.model_name,
+            dimension=embedder.dimension,
+            table_name="sovereign_knowledge"
+        )
+    return state.knowledge_storage
 
 def get_context_vault() -> ContextVault:
     if not state.context_vault:
