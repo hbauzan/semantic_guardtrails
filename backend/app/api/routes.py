@@ -87,7 +87,7 @@ async def simulate_query(
     
     for hit in results:
         if hit.get('cluster_id', 0) < 0:  # Sovereign Node
-            distance = hit.get('_distance', 1.0)
+            distance = hit.get('_distance', 0.0)
             if distance < state.firewall_threshold:
                 is_blocked = True
                 collided_with = hit.get('cluster_label', 'Unknown Pack')
@@ -228,8 +228,10 @@ async def arithmetic(
         if word.lower() not in input_words:
             final_results.append({
                 "word": word,
-                "score": 1.0 - hit['_distance'],
-                "token_id": hit['id']
+                "score": 1.0 / (1.0 + hit['_distance']),
+                "token_id": hit['id'],
+                "vector": hit.get('vector', []),
+                "_distance": hit['_distance']
             })
             if len(final_results) >= request.top_k:
                 break

@@ -83,7 +83,7 @@ class Storage:
 
     def search(self, query_vector: List[float], limit: int = 10, filter_cluster_id: Optional[int] = None) -> List[Dict]:
         # LanceDB search
-        query = self.table.search(query_vector, vector_column_name="vector").metric("cosine")
+        query = self.table.search(query_vector, vector_column_name="vector").metric("l2")
         
         if filter_cluster_id is not None:
             query = query.where(f"cluster_id = {filter_cluster_id}")
@@ -120,11 +120,11 @@ class Storage:
         for _, row in results.iterrows():
             nid = int(row['id'])
             if nid != item_id:
-                # _distance from LanceDB is usually Cosine distance (0=identical, 2=opposites)
-                # We map to a similarity score 1.0 - _distance
+                # _distance from LanceDB is now L2 distance
+                # We map to a similarity score using decay function: 1.0 / (1.0 + distance)
                 dist = float(row.get('_distance', 0.0))
-                # Ensure no negative scores just in case
-                score = max(0.0, 1.0 - dist)
+                # Map L2 to score
+                score = 1.0 / (1.0 + dist)
                 
                 neighbors.append({
                     "id": nid,

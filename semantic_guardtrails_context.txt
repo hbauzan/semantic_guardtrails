@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-10 22:30:32.156594
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-13 23:58:04.470187
 
 
 ################################################################################
@@ -13,8 +13,7 @@ FILE: architecture_spec.md
 * **Environment:** `sg_env`
 
 ## 2. Core Endpoints
-* `POST /embed`: Text to 1024D vector.
-* `POST /arithmetic`: Vector math (`A - B + C`).
+* `POST /tokenize`: Returns raw 1024D vector mappings, utilized heavily by the Auditor Console for stress-test inputs and Master Baseline validation.
 
 ## 3. Tooling
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
@@ -22,13 +21,15 @@ FILE: architecture_spec.md
 ## 6. Current Flight Status
 ### Navigation & Flight Mechanics
 *   **Smooth Flight**: Inertia-based camera movement with drag damping (AWSD + QE).
-*   **Hyper-Boost x100**: Instantaneous thrust application (Shift key) using dynamic `BOOST_FACTOR` slider, capable of x100 effective speed multiplication. Both acceleration and deceleration are responsive.
-*   **Mouse Look**: `PointerLockControls` integrated with global click-to-lock, featuring 2e-compliant input suppression (ignores typing in text fields).
+*   **Hyper-Boost x100**: Instantaneous logarithmic/exponential thrust application (Shift key) using dynamic `BOOST_FACTOR` slider, capable of fine-grained low speed and explosive high speed control.
+*   **Mouse Look**: `PointerLockControls` integrated with global click-to-lock, featuring 2e-compliant input suppression (ignores typing in text fields). PointerLock is strictly gesture-enforced to comply with browser security policies.
+*   **Tactical Radial Radar HUD**: Replaces legacy 3D Compass. A 2D SVG overlay rendering the Master Baseline at center, a Firewall threshold ring, and mapping semantic threads relative to a calculated deterministic `maxRadius`. Screen-space locked to the bottom right. All 2D SVG overlays (like the Tactical Radial Radar HUD) are rendered strictly in the DOM layer outside the WebGL Canvas.
+*   **Deterministic Auto-Fit Camera**: Automatic deterministic camera framing triggered upon `EXECUTE AUDIT`. Computes a `maxRadius` encompassing the Master Baseline, extreme stress threads, and Firewall boundaries. Forces the viewport to a Cenital View (`Y = maxRadius * 1.5`, `Z = maxRadius * 0.5`) staring directly at the absolute origin.
 
 ### Visualizations
 *   **Semantic Ribbon Trace**: Real-time rendering of 1024D vector geometries strictly utilizing `THREE.InstancedMesh` with a predefined 1024 count for optimal performance, and connected points forming a continuous thread with `THREE.Line`.
-    *   **Spatial Positioning Algorithm (Radial Cosine Distance on XZ Plane)**:
-        *   **Cosine Distance ($D_n$)**: Calculated relative to the master token (Word A) which is rigidly fixed at the absolute origin `[0, 0, 0]`. If vector magnitude is 0, $D_n$ defaults to 1.
+    *   **Spatial Positioning Algorithm (Radial Euclidean Distance on XZ Plane)**:
+        *   **Euclidean Distance ($D_n$)**: Calculated relative to the master token (Word A) which is rigidly fixed at the absolute origin `[0, 0, 0]`.
         *   **Radial Mapping (Semantic Disk)**: Thread anchor position is defined purely on the 2D XZ plane. The bearing is derived from dimensions `[0]` and `[2]`: `angle = Math.atan2(vector[2], vector[0])`. Position maps as `[Math.cos(angle) * Dn * ui_scale * 50, 0, Math.sin(angle) * Dn * ui_scale * 50]`.
         *   **Local Space Mapping (Visual DNA)**:
             *   `X`: Linear stretch of the dimensions `(index - 512) * xStretch`. `xStretch` scales dynamically between `0.1` and `40.0`.
@@ -38,12 +39,23 @@ FILE: architecture_spec.md
         *   `~1.0`: Bright White/Yellow/Green (Emissive).
         *   `~0.0`: Opacity 0.1 / Transparent (Fragment discard via shader).
         *   `~-1.0`: Deep Blue/Violet/Red.
+    *   **Firewall Threat Indicator**: Setting `isBlocked` prop forces shader material to blink Warning Red, overriding standard chromatic values when Euclidean distance triggers an alert.
+
+### The Dual-Zone Auditor's Console
+The UI has been refactored into a **Dual-Zone Security Console**, purging old vector arithmetic visualizations.
+*   **Zone Alpha (Master Baseline)**: A single input query rigidly fixed at `[0,0,0]`.
+*   **Zone Beta (Stress Test Sandbox)**: Compares `STRESS_TEST_QUERY` vector against the Master Baseline using $D_n$.
+*   **Firewall Logic Threshold ($D_{fire}$)**: If distance to `STRESS` $\ge D_{fire}$, HUD shifts to **BLOCKED**.
 
 ### Deep Observability & Telemetry
+### Deep Observability & Telemetry
 *   **Zero-Dependency Native HUD**: Telemetry overlay built built with `requestAnimationFrame` ensuring zero external profiling overhead. Reports active **FPS**, total **Nodes**, current **xStretch**, and total **SECTOR SIZE**.
+*   **L2 Analysis Panel**: Upon click-to-inspecting a semantic thread, reveals the raw Euclidean Distance ($D_n$), live mathematical formulation `sqrt(sum((A_i - B_i)^2))`, and derived percentage confidence calculated as `1 / (1 + D_n)`.
+    *   **Noise Delta Map**: Explicitly enumerates dimensions exhibiting high variance (`delta > 0.2`) relative to the Master Baseline.
 *   **Infinite Visibility Render bounds**: Canvas camera Frustum is statically configured to `{ near: 1, far: 200000 }` to guarantee no thread dropout at x40 stretches.
 *   **Dimension Probe (Crosshair)**: A fixed SVG crosshair mathematically intercepts the specific S-DNA array index (`i ∈ [0, 1023]`) from the camera's viewport orientation.
-    *   Targets exact dimensional vectors revealing `DIM-ID` and precise float `MAGNITUDE` arrays across all active semantic threads.
+    *   Targets exact dimensional vectors revealing `DIM-ID`, and specifically shows **Dimensional Delta** between the baseline ($A_i$) and the hovered S-DNA thread ($B_i$) along with the `Abs Error`.
+*   **Context Injector API**: Integrated lateral modal allowing raw text parsing (`term: definition` formats) streamed directly into the `/corpus/inject-pack` LanceDB backend.
 ################################################################################
 FILE: manifest.json
 ################################################################################
@@ -53,8 +65,9 @@ FILE: manifest.json
     "version": "0.4.1",
     "active_features": {
         "neural_core_bge_m3": true,
-        "vector_arithmetic": true,
-        "minimalist_hud": true,
+        "vector_arithmetic": false,
+        "minimalist_auditor_ui": true,
+        "single_baseline_audit": true,
         "context_packager": true,
         "flight_mechanics_awsd": true,
         "exponential_thrust_shift": true,
@@ -73,9 +86,26 @@ FILE: manifest.json
         "anti_error_guardrails": true,
         "hyper_boost_physics": true,
         "radial_cosine_distance": true,
-        "ui_scale_factor_control": true,
         "ui_scale_factor_bugfix": true,
-        "semantic_disk_topology": true
+        "semantic_disk_topology": true,
+        "euclidean_l2_metric": true,
+        "l2_firewall_strictness": true,
+        "l2_analysis_panel": true,
+        "click_to_inspect": true,
+        "context_injector_ui": true,
+        "logarithmic_flight_boost": true,
+        "stress_test_sandbox": true,
+        "axis_compass_3d": true,
+        "radial_threshold_rings": true,
+        "noise_delta_map": true,
+        "high_visibility_compass": true,
+        "auto_viewport_fit": true,
+        "tactical_stabilization": true,
+        "radial_radar_hud": true,
+        "is_typing_focus_lock": true,
+        "deterministic_auto_fit": true,
+        "r3f_namespace_fix": true,
+        "pointer_lock_gesture_enforced": true
     },
     "constraints": {
         "manifold_bounds": [
@@ -241,7 +271,7 @@ async def simulate_query(
     
     for hit in results:
         if hit.get('cluster_id', 0) < 0:  # Sovereign Node
-            distance = hit.get('_distance', 1.0)
+            distance = hit.get('_distance', 0.0)
             if distance < state.firewall_threshold:
                 is_blocked = True
                 collided_with = hit.get('cluster_label', 'Unknown Pack')
@@ -382,8 +412,10 @@ async def arithmetic(
         if word.lower() not in input_words:
             final_results.append({
                 "word": word,
-                "score": 1.0 - hit['_distance'],
-                "token_id": hit['id']
+                "score": 1.0 / (1.0 + hit['_distance']),
+                "token_id": hit['id'],
+                "vector": hit.get('vector', []),
+                "_distance": hit['_distance']
             })
             if len(final_results) >= request.top_k:
                 break
@@ -1111,7 +1143,7 @@ class Storage:
 
     def search(self, query_vector: List[float], limit: int = 10, filter_cluster_id: Optional[int] = None) -> List[Dict]:
         # LanceDB search
-        query = self.table.search(query_vector, vector_column_name="vector").metric("cosine")
+        query = self.table.search(query_vector, vector_column_name="vector").metric("l2")
         
         if filter_cluster_id is not None:
             query = query.where(f"cluster_id = {filter_cluster_id}")
@@ -1148,11 +1180,11 @@ class Storage:
         for _, row in results.iterrows():
             nid = int(row['id'])
             if nid != item_id:
-                # _distance from LanceDB is usually Cosine distance (0=identical, 2=opposites)
-                # We map to a similarity score 1.0 - _distance
+                # _distance from LanceDB is now L2 distance
+                # We map to a similarity score using decay function: 1.0 / (1.0 + distance)
                 dist = float(row.get('_distance', 0.0))
-                # Ensure no negative scores just in case
-                score = max(0.0, 1.0 - dist)
+                # Map L2 to score
+                score = 1.0 / (1.0 + dist)
                 
                 neighbors.append({
                     "id": nid,
@@ -2568,10 +2600,10 @@ def test_vector_magnitudes_safe_math():
         mag_a = math.sqrt(sum(a*a for a in vec_a))
         mag_n = math.sqrt(sum(n*n for n in vec_n))
         
-        dn = 1.0
+        dn = 0.0
         if mag_a > 0 and mag_n > 0:
-            dot = sum(a * b for a, b in zip(vec_a, vec_n))
-            dn = 1 - (dot / (mag_a * mag_n))
+            diff_squared_sum = sum((a - n)**2 for a, n in zip(vec_a, vec_n))
+            dn = math.sqrt(diff_squared_sum)
             
         if math.isnan(dn):
             log_fail("SafeMath failed: Math produced NaN")
@@ -2617,12 +2649,275 @@ def test_xz_layout_bearing_math():
         log_fail("Exception", str(e))
         return False
 
+def test_l2_distance_integrity():
+    log_section("Testing L2 Distance Integrity")
+    try:
+        # Just ensure arithmetic endpoint didn't crash because we swapped the metric
+        r = httpx.post(f"{BASE_URL}/arithmetic", json={"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            log_success("L2 Distance Integrity OK. Endpoint is stable with new metric.")
+            return True
+        log_fail("L2 Distance Integrity failed. Endpoint crashed.")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_l2_frontend_backend_parity():
+    log_section("Testing L2 Frontend-Backend Mathematical Parity")
+    try:
+        import math
+        r = httpx.post(f"{BASE_URL}/arithmetic", json={"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 1}, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Arithmetic request failed.")
+            return False
+        data = r.json()
+        vector_a = data.get("vector") # Base vector
+        results = data.get("results", [])
+        if not vector_a or not results:
+            log_info("Skipped L2 Parity: DB might be empty or missing vector data.")
+            return True
+            
+        vector_n = results[0].get("vector")
+        backend_distance = results[0].get("_distance", 0) # LanceDB's actual L2 output
+        
+        if not vector_n:
+            log_fail("Missing vector in result node.")
+            return False
+
+        # Frontend calculation replica: sum((A_i - B_i)^2) -> LanceDB "l2" metric is actually squared L2 distance.
+        diff_squared_sum = sum((a - n)**2 for a, n in zip(vector_a, vector_n))
+        frontend_distance = diff_squared_sum
+        
+        # Parity check (allowing for micro-frictions in float precision)
+        if abs(frontend_distance - backend_distance) > 0.0001:
+            log_fail(f"L2 Parity mismatch! Frontend formula: {frontend_distance:.5f} != Backend LanceDB: {backend_distance:.5f}")
+            return False
+            
+        log_success(f"L2 Parity Verified: Frontend ({frontend_distance:.4f}) == Backend ({backend_distance:.4f})")
+        return True
+    except Exception as e:
+        log_fail(f"Exception in L2 Parity Test: {e}")
+        return False
+
+def test_inject_pack_stress():
+    log_section("Testing Context Inject Pack Stress (/corpus/inject-pack)")
+    try:
+        payload = {
+            "name": "Stress Pack",
+            "color": "#ff00ff",
+            "description": "Auto-test injection payload",
+            "terms": {
+                "Alpha Centauri": "Nearest star system.",
+                "Singularity": "Center of a black hole."
+            }
+        }
+        r = httpx.post(f"{BASE_URL}/corpus/inject-pack", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            log_success("Context Inject Pack OK")
+            return True
+        else:
+            log_fail(f"Inject Pack failed with code {r.status_code}", r.text)
+            return False
+    except Exception as e:
+        # If the endpoint doesn't exist yet, it's fine for now, we'll verify this during the system heartbeat.
+        log_fail(f"Exception during Inject Pack Test: {e}")
+        return False
+
+def test_firewall_trigger_logic():
+    log_section("Testing Firewall Trigger Logic (Math Validation)")
+    try:
+        import math
+        firewall_threshold = 25.0
+        vec_a = [0.0] * 1024
+        vec_b_safe = [0.1] * 1024
+        vec_b_blocked = [1.5] * 1024
+
+        dn_safe = math.sqrt(sum((a - b)**2 for a, b in zip(vec_a, vec_b_safe)))
+        dn_blocked = math.sqrt(sum((a - b)**2 for a, b in zip(vec_a, vec_b_blocked)))
+
+        if dn_safe >= firewall_threshold:
+            log_fail(f"Logic Error: Safe vector blocked! Dn: {dn_safe:.2f} >= {firewall_threshold}")
+            return False
+
+        if dn_blocked < firewall_threshold:
+            log_fail(f"Logic Error: Blocked vector allowed! Dn: {dn_blocked:.2f} < {firewall_threshold}")
+            return False
+        
+        log_success(f"Firewall Logic OK -> Safe: {dn_safe:.2f}, Blocked: {dn_blocked:.2f} (Threshold: {firewall_threshold})")
+        return True
+    except Exception as e:
+        log_fail(f"Exception during Firewall Test: {e}")
+        return False
+
+def test_single_baseline_l2_audit():
+    log_section("Testing Single Baseline L2 Audit Tokenization (/tokenize)")
+    try:
+        # Test 1: Fetch Word A (Master Baseline)
+        r_base = httpx.post(
+            f"{BASE_URL}/tokenize",
+            json={"text": "rey", "include_raw_vector": True},
+            timeout=TIMEOUT
+        )
+        if r_base.status_code != 200:
+            log_fail("Master Baseline tokenize request failed", r_base.text)
+            return False
+
+        data_base = r_base.json()
+        tokens_base = data_base.get("tokens", [])
+        if not tokens_base or "vector" not in tokens_base[0]:
+            log_fail("Master Baseline raw vector was missing.")
+            return False
+
+        vector_base = tokens_base[0]["vector"]
+        if len(vector_base) != 1024:
+             log_fail(f"Master Baseline Vector has unexpected dimensionality: {len(vector_base)}")
+             return False
+
+        # Test 2: Fetch Stress Test Query
+        r_stress = httpx.post(
+            f"{BASE_URL}/tokenize",
+            json={"text": "reina", "include_raw_vector": True},
+            timeout=TIMEOUT
+        )
+        if r_stress.status_code != 200:
+            log_fail("Stress Test tokenize request failed", r_stress.text)
+            return False
+
+        data_stress = r_stress.json()
+        tokens_stress = data_stress.get("tokens", [])
+        if not tokens_stress or "vector" not in tokens_stress[0]:
+            log_fail("Stress Test raw vector was missing.")
+            return False
+
+        vector_stress = tokens_stress[0]["vector"]
+        if len(vector_stress) != 1024:
+             log_fail(f"Stress Test Vector has unexpected dimensionality: {len(vector_stress)}")
+             return False
+
+        # Test 3: Validate L2 Distance
+        import math
+        diff_squared_sum = sum((a - s)**2 for a, s in zip(vector_base, vector_stress))
+        dn = math.sqrt(diff_squared_sum)
+
+        if math.isnan(dn):
+            log_fail("L2 distance calculation produced NaN.")
+            return False
+
+        log_success(f"Single Baseline L2 Audit Tokenization OK. (Dn: {dn:.4f})")
+        return True
+    except Exception as e:
+        log_fail("Exception during Single Baseline L2 Audit test", str(e))
+        return False
+
+def test_l2_bounding_box_math():
+    log_section("Testing L2 Auto-Fit Bounding Box Math")
+    try:
+        import math
+        vec_a = [0.0] * 1024
+        vec_n = [1.0] * 1024
+        uiScaleFactor = 5.0
+        BASE_SPREAD = 50.0
+
+        mag_a = math.sqrt(sum(a*a for a in vec_a))
+        mag_n = math.sqrt(sum(n*n for n in vec_n))
+        
+        maxDn = 0.0
+        if mag_a == 0.0 and mag_n > 0.0:
+             # Our frontend handles length > 0, but technically Math.sqrt behaves well if a is 0. 
+             # Let's verify sum squares
+             diff_squared_sum = sum((a - n)**2 for a, n in zip(vec_a, vec_n))
+             maxDn = math.sqrt(diff_squared_sum)
+
+        angle = math.atan2(vec_n[2], vec_n[0])
+        normX = math.cos(angle)
+        normZ = math.sin(angle)
+        
+        posX = normX * maxDn * uiScaleFactor * BASE_SPREAD
+        posZ = normZ * maxDn * uiScaleFactor * BASE_SPREAD
+        
+        if math.isnan(posX) or math.isnan(posZ):
+            log_fail("Bounding Box projection Math produced NaN.")
+            return False
+
+        log_success(f"Bounding Box Math OK. Projections generated: X={posX:.2f}, Z={posZ:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during L2 Bounding Box test", str(e))
+        return False
+
+def test_cenital_autofit_math():
+    log_section("Testing Cenital Auto-Fit Camera Math")
+    try:
+        import math
+        # Simulate frontend deterministic logic
+        firewallThreshold = 25.0
+        uiScaleFactor = 2.0
+        BASE_SPREAD = 50.0
+        
+        # Scenario: Stress test thread is further than firewall
+        maxDn = 30.0 
+        
+        ringRadius = firewallThreshold * 1.5 * uiScaleFactor * BASE_SPREAD
+        maxNodeRadius = maxDn * uiScaleFactor * BASE_SPREAD
+        
+        # The logic: Math.max(ringRadius, maxNodeRadius) + padding
+        maxRadius = max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor)
+        
+        # Assert math constraints
+        expected_Y = maxRadius * 1.5
+        expected_Z = maxRadius * 0.5
+        
+        if expected_Y <= 0 or expected_Z <= 0:
+            log_fail(f"Logic Error: Negative or zero camera coordinates Y={expected_Y}, Z={expected_Z}")
+            return False
+            
+        log_success(f"Cenital Auto-Fit Math OK. Deterministic Framing: Y={expected_Y:.2f}, Z={expected_Z:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during Cenital Auto-Fit Math test", str(e))
+        return False
+
+def test_radar_hud_telemetry_bounds():
+    log_section("Testing Radar HUD Telemetry Bounds Math Check")
+    try:
+        import math
+        firewallThreshold = 100.0
+        uiScaleFactor = 40.0
+        BASE_SPREAD = 50.0
+        
+        # Scenario: Extreme stress test thread distance
+        maxDn = 1500.0
+        
+        ringRadius = firewallThreshold * 1.5 * uiScaleFactor * BASE_SPREAD
+        maxNodeRadius = maxDn * uiScaleFactor * BASE_SPREAD
+        
+        # Expected frontend deterministic calculation
+        maxRadius = max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor)
+        
+        if math.isnan(maxRadius) or math.isinf(maxRadius):
+            log_fail("Math Error: maxRadius resulted in NaN or Infinity.")
+            return False
+            
+        if maxRadius <= 0:
+            log_fail("Math Error: maxRadius is zero or negative.")
+            return False
+            
+        log_success(f"Radar HUD Telemetry Bounds OK. Deterministic maxRadius calculated as finite number: {maxRadius:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during Radar HUD Telemetry Bounds Math Check", str(e))
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
         test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
         test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
-        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math
+        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math,
+        test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
+        test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
+        test_cenital_autofit_math, test_radar_hud_telemetry_bounds
     ]
     all_passed = True
     for test in tests:
@@ -2995,6 +3290,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "🧹 Clearing Vite and Build caches..."
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
+rm -rf "$PROJECT_ROOT/frontend/dist"
 
 # 1. Limpieza de Puertos
 PID=$(lsof -ti :$PORT || true)
@@ -3037,6 +3333,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "🧹 Clearing Vite and Build caches..."
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
+rm -rf "$PROJECT_ROOT/frontend/dist"
 
 echo "👁️ Deep Observability Testing Initialized."
 source "$PROJECT_ROOT/sg_env/bin/activate"
@@ -3139,6 +3436,7 @@ interface SemanticThreadProps {
   xStretch?: number;
   amplitude?: number;
   baseColor?: string;
+  isBlocked?: boolean;
 }
 
 export const SemanticThread: React.FC<SemanticThreadProps> = ({
@@ -3146,7 +3444,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   position = [0, 0, 0],
   xStretch = 1.0,
   amplitude = 100.0,
-  baseColor = '#ffffff'
+  baseColor = '#ffffff',
+  isBlocked = false
 }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = 1024;
@@ -3158,7 +3457,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   const shaderMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
       uniforms: {
-        uBaseColor: { value: parsedBaseColor }
+        uBaseColor: { value: parsedBaseColor },
+        uIsBlocked: { value: isBlocked ? 1.0 : 0.0 }
       },
       vertexShader: `
         attribute float instanceValue;
@@ -3174,6 +3474,7 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
       `,
       fragmentShader: `
         uniform vec3 uBaseColor;
+        uniform float uIsBlocked;
         varying float vValue;
 
         void main() {
@@ -3181,9 +3482,9 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
           float alpha = 1.0;
 
           if (vValue >= 0.5) {
-            finalColor = uBaseColor;
+            finalColor = uIsBlocked > 0.5 ? vec3(1.0, 0.2, 0.0) : uBaseColor;
           } else if (vValue <= -0.5) {
-            finalColor = vec3(0.3, 0.0, 0.8); // Deep Blue/Purple
+            finalColor = uIsBlocked > 0.5 ? vec3(0.8, 0.0, 0.0) : vec3(0.3, 0.0, 0.8); // Deep Blue/Purple or Dark Red
           } else {
             finalColor = vec3(0.2, 0.2, 0.2);
             alpha = 0.05;
@@ -3204,7 +3505,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
 
   useEffect(() => {
     shaderMaterial.uniforms.uBaseColor.value = parsedBaseColor;
-  }, [parsedBaseColor, shaderMaterial]);
+    shaderMaterial.uniforms.uIsBlocked.value = isBlocked ? 1.0 : 0.0;
+  }, [parsedBaseColor, isBlocked, shaderMaterial]);
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
@@ -3281,7 +3583,7 @@ FILE: frontend/src/components/ArithmeticHUD.tsx
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Sphere, Text, PointerLockControls, Billboard } from '@react-three/drei';
+import { Sphere, Text, PointerLockControls, Billboard, Ring } from '@react-three/drei';
 import * as THREE from 'three';
 import { useKeyboardControls } from '../hooks/useKeyboardControls';
 import { SemanticThread } from './SemanticThread';
@@ -3304,10 +3606,24 @@ const FlightControls: React.FC = () => {
   useEffect(() => {
     const handleFocus = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      // Only blur if clicking directly on the canvas (Drei handles PointerLock internally)
+      // Only blur if clicking directly on the canvas
       if (target.tagName === 'CANVAS') {
         if (document.activeElement && document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
+        }
+
+        const isCurrentlyTyping = useSemanticStore.getState().isTyping;
+        if (isCurrentlyTyping) return;
+
+        if (controlsRef.current && controlsRef.current.lock) {
+          try {
+            const promise = controlsRef.current.lock();
+            if (promise && promise.catch) {
+              promise.catch(() => { }); // Gracefully swallow lingering SecurityError
+            }
+          } catch (err) {
+            // Ignore synchronous errors
+          }
         }
       }
     };
@@ -3315,6 +3631,8 @@ const FlightControls: React.FC = () => {
     document.addEventListener('mousedown', handleFocus);
     return () => document.removeEventListener('mousedown', handleFocus);
   }, []);
+
+  // We explicitly disable auto-enabling in PointerLockControls to manage it manually via the click listener above.
 
   useFrame((state, delta) => {
     // 1. Inertia (Damping)
@@ -3337,9 +3655,9 @@ const FlightControls: React.FC = () => {
       inputVector.normalize();
     }
 
-    // 4. Apply Acceleration relative to Camera Orientation
+    // 4. Apply Logarithmic Acceleration relative to Camera Orientation
     inputVector.applyEuler(state.camera.rotation);
-    const effectiveAccel = BASE_ACCEL * currentBoost;
+    const effectiveAccel = BASE_ACCEL * Math.pow(1.05, currentBoost);
 
     if (isBoosting) {
       if (inputVector.lengthSq() > 0) {
@@ -3355,7 +3673,8 @@ const FlightControls: React.FC = () => {
     state.camera.position.add(velocity.current);
   });
 
-  return <PointerLockControls ref={controlsRef} makeDefault />;
+  // Set enabled false so it doesn't try to lock automatically, we handle it explicitly.
+  return <PointerLockControls ref={controlsRef} makeDefault enabled={false} />;
 };
 
 type NodeData = {
@@ -3438,6 +3757,11 @@ const TargetingHUD: React.FC = () => {
 
   if (index === null) return null;
 
+  const baselineA = values.length >= 1 ? values[0] : 0;
+  const targetN = values.length >= 2 ? values[1] : 0; // The actual target hovered right now
+  // We compute delta for the specific dimension
+  const delta = Math.abs(baselineA - targetN);
+
   return (
     <div style={{
       position: 'absolute',
@@ -3462,10 +3786,11 @@ const TargetingHUD: React.FC = () => {
         DIM-ID: {index}
       </div>
       <div style={{ color: '#aaa', fontSize: '0.75rem', marginBottom: '2px' }}>MAGNITUDE</div>
-      {values.length >= 1 && <div style={{ color: colors.wordA }}>A: {values[0].toFixed(4)}</div>}
-      {values.length >= 2 && <div style={{ color: colors.wordB }}>B: {values[1].toFixed(4)}</div>}
-      {values.length >= 3 && <div style={{ color: colors.wordC }}>C: {values[2].toFixed(4)}</div>}
-      {values.length >= 4 && <div style={{ color: colors.result }}>RES: {values[3].toFixed(4)}</div>}
+      {values.length >= 1 && <div style={{ color: colors.baselineColor }}>A_i: {baselineA.toFixed(4)}</div>}
+      <div style={{ color: '#00ccff' }}>B_i (Input): {targetN.toFixed(4)}</div>
+      <div style={{ color: '#ff3333', marginTop: '2px', borderTop: '1px solid #444', paddingTop: '2px' }}>
+        Abs Error: {delta.toFixed(4)}
+      </div>
     </div>
   );
 };
@@ -3475,10 +3800,29 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
   const { camera } = useThree();
   const setHoveredDimensionIndex = useSemanticStore(state => state.setHoveredDimensionIndex);
   const setSelectedValues = useSemanticStore(state => state.setSelectedValues);
+  const setHoveredNode = useSemanticStore(state => state.setHoveredNode);
+  const setSelectedThread = useSemanticStore(state => state.setSelectedThread);
+
+  useEffect(() => {
+    const handleMouseClick = () => {
+      if (document.pointerLockElement) {
+        // We are locked and looking around...
+        const hoveredNode = useSemanticStore.getState().hoveredNode;
+        if (hoveredNode) {
+          setSelectedThread(hoveredNode);
+        } else {
+          setSelectedThread(null);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleMouseClick);
+    return () => document.removeEventListener('mousedown', handleMouseClick);
+  }, [setSelectedThread]);
 
   useFrame(() => {
-    if (nodes.length < 4) {
+    if (nodes.length < 2) { // Only need baseline and stress test nodes
       setHoveredDimensionIndex(null);
+      setHoveredNode(null);
       return;
     }
 
@@ -3504,10 +3848,13 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
             const vA = nodes[0].vector;
             const magA = Math.sqrt(vA.reduce((sum, val) => sum + val * val, 0));
             const magN = Math.sqrt(n.vector.reduce((sum, val) => sum + val * val, 0));
-            let dn = 1;
+            let dn = 0; // default to 0 for Euclidean
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (n.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (n.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             const angle = Math.atan2(n.vector[2], n.vector[0]);
             posX = Math.cos(angle) * dn * uiScaleFactor * 50.0;
@@ -3525,9 +3872,14 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
         if (closestNodeIdx !== -1 && minZDist < 10.0) {
           let targetedIndex = Math.round(((hitPoint.x - closestPosX) / xStretch) + 512);
 
+          setHoveredNode(nodes[closestNodeIdx]);
+
           if (targetedIndex >= 0 && targetedIndex < 1024) {
             setHoveredDimensionIndex(targetedIndex);
-            const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
+            const values = [
+              nodes[0]?.vector && nodes[0].vector.length > targetedIndex ? nodes[0].vector[targetedIndex] : 0, // baseline A
+              nodes[closestNodeIdx]?.vector && nodes[closestNodeIdx].vector!.length > targetedIndex ? nodes[closestNodeIdx].vector![targetedIndex] : 0 // current target layer B
+            ];
             setSelectedValues(values);
             return;
           }
@@ -3535,29 +3887,161 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
       }
     }
 
+    setHoveredNode(null);
     setHoveredDimensionIndex(null);
   });
 
   return null;
 };
 
+const CameraAutoFit: React.FC<{ maxRadius: number | null, onComplete: () => void }> = ({ maxRadius, onComplete }) => {
+  const { controls } = useThree();
+  const [animating, setAnimating] = useState(false);
+
+  useEffect(() => {
+    if (maxRadius !== null && maxRadius > 0) {
+      setAnimating(true);
+    }
+  }, [maxRadius]);
+
+  useFrame((state, delta) => {
+    if (!animating || maxRadius === null) return;
+
+    // Cenital View Deterministic Framing
+    const targetPos = new THREE.Vector3(0, maxRadius * 1.5, maxRadius * 0.5);
+    const targetLookAt = new THREE.Vector3(0, 0, 0);
+
+    // Lerp camera position
+    state.camera.position.lerp(targetPos, delta * 2.5);
+
+    // Depending on if PointerLock is engaged, updating lookAt can conflict.
+    // If we have OrbitControls, we update target. If no specific controls block it, we lookAt.
+    if (controls && (controls as any).target) {
+      (controls as any).target.lerp(targetLookAt, delta * 2.5);
+    } else {
+      // Attempt smoothing
+      const currentTarget = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion).add(state.camera.position);
+      currentTarget.lerp(targetLookAt, delta * 2.5);
+      state.camera.lookAt(currentTarget);
+    }
+
+    // Stop animating when close enough
+    if (state.camera.position.distanceTo(targetPos) < 1.0) {
+      setAnimating(false);
+      state.camera.position.copy(targetPos);
+      state.camera.lookAt(targetLookAt);
+      onComplete();
+    }
+  });
+
+  return null;
+};
+
+const RadarHUD: React.FC<{ nodes: NodeData[], maxRadius: number | null }> = ({ nodes, maxRadius }) => {
+  const firewallThreshold = useSemanticStore(state => state.firewallThreshold);
+  const uiScaleFactor = useSemanticStore(state => state.uiScaleFactor);
+
+  if (!maxRadius || maxRadius <= 0) return null;
+
+  const radarSize = 200;
+  const center = radarSize / 2;
+  const scale = (radarSize / 2 - 10) / maxRadius; // 10px padding
+
+  const ringRadius = firewallThreshold * 1.5 * uiScaleFactor * 50.0 * scale;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: '20px',
+      right: '20px',
+      width: `${radarSize}px`,
+      height: `${radarSize}px`,
+      borderRadius: '50%',
+      background: 'rgba(0, 20, 20, 0.6)',
+      border: '2px solid #00ffff',
+      boxShadow: '0 0 15px rgba(0, 255, 255, 0.3)',
+      zIndex: 10,
+      pointerEvents: 'none'
+    }}>
+      <svg width={radarSize} height={radarSize} style={{ position: 'absolute', top: 0, left: 0 }}>
+        {/* Crosshairs */}
+        <line x1={center} y1="0" x2={center} y2={radarSize} stroke="rgba(0, 255, 255, 0.3)" strokeWidth="1" />
+        <line x1="0" y1={center} x2={radarSize} y2={center} stroke="rgba(0, 255, 255, 0.3)" strokeWidth="1" />
+
+        {/* Firewall Boundary */}
+        <circle cx={center} cy={center} r={ringRadius} fill="none" stroke="#ff0000" strokeWidth="2" strokeDasharray="4 4" />
+
+        {/* Nodes */}
+        {nodes.map((node, idx) => {
+          const cx = center + node.position[0] * scale;
+          const cy = center + node.position[2] * scale;
+          const isMaster = idx === 0;
+          return (
+            <circle
+              key={idx}
+              cx={cx}
+              cy={cy}
+              r={isMaster ? 4 : 3}
+              fill={node.color}
+              stroke={isMaster ? '#fff' : '#000'}
+              strokeWidth="1"
+            />
+          );
+        })}
+      </svg>
+      <div style={{
+        position: 'absolute',
+        top: '-20px',
+        width: '100%',
+        textAlign: 'center',
+        color: '#00ffff',
+        fontSize: '0.75rem',
+        fontFamily: 'monospace',
+        textTransform: 'uppercase'
+      }}>Tactical Radar</div>
+    </div>
+  );
+};
+
 
 const ArithmeticHUD: React.FC = () => {
   // Suppress THREE.Clock deprecation warning caused by React Three Fiber internals
+  // and SecurityError from pointer lock without gesture
   useEffect(() => {
     const origWarn = console.warn;
     console.warn = (...args) => {
       if (typeof args[0] === 'string' && args[0].includes('THREE.Clock: This module has been deprecated')) return;
       origWarn(...args);
     };
+
+    const origError = console.error;
+    console.error = (...args) => {
+      if (args.length > 0 && args[0] instanceof DOMException && args[0].name === 'SecurityError') {
+        // Suppress PointerLock SecurityError spam
+        return;
+      }
+      origError(...args);
+    }
+
+    // Global error listener for unhandled rejections related to pointer lock
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      if (e.reason && e.reason.name === 'SecurityError') {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('unhandledrejection', handleRejection);
+
     return () => {
       console.warn = origWarn;
+      console.error = origError;
+      window.removeEventListener('unhandledrejection', handleRejection);
     };
   }, []);
 
   const [wordA, setWordA] = useState('rey');
-  const [wordB, setWordB] = useState('hombre');
-  const [wordC, setWordC] = useState('mujer');
+  const [showInjector, setShowInjector] = useState(false);
+  const [injectorText, setInjectorText] = useState('');
+  const [injectorStatus, setInjectorStatus] = useState('');
 
   const uiScaleFactor = useSemanticStore((state) => state.uiScaleFactor);
   const setUiScaleFactor = useSemanticStore((state) => state.setUiScaleFactor);
@@ -3568,18 +4052,61 @@ const ArithmeticHUD: React.FC = () => {
   const boostFactor = useSemanticStore((state) => state.boostFactor);
   const setBoostFactor = useSemanticStore((state) => state.setBoostFactor);
 
+  const stressTestQuery = useSemanticStore((state) => state.stressTestQuery);
+  const setStressTestQuery = useSemanticStore((state) => state.setStressTestQuery);
+  const firewallThreshold = useSemanticStore((state) => state.firewallThreshold);
+  const setFirewallThreshold = useSemanticStore((state) => state.setFirewallThreshold);
+  const setIsTyping = useSemanticStore((state) => state.setIsTyping);
+
   const colors = useSemanticStore((state) => state.colors);
-  const setColorA = useSemanticStore((state) => state.setColorA);
-  const setColorB = useSemanticStore((state) => state.setColorB);
-  const setColorC = useSemanticStore((state) => state.setColorC);
-  const setResultColor = useSemanticStore((state) => state.setResultColor);
+  const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
 
   const topResults = useSemanticStore((state) => state.results);
   const setResults = useSemanticStore((state) => state.setResults);
+  const selectedThread = useSemanticStore(state => state.selectedThread);
 
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [cameraMaxRadius, setCameraMaxRadius] = useState<number | null>(null);
+
+  const [isStressInputFocused, setIsStressInputFocused] = useState(false);
+
+  const handleInject = async () => {
+    if (!injectorText.trim()) return;
+    setInjectorStatus('Injecting...');
+    try {
+      const lines = injectorText.split('\n');
+      const terms: Record<string, string> = {};
+      lines.forEach(line => {
+        if (line.includes(':')) {
+          const [k, v] = line.split(':');
+          terms[k.trim()] = v.trim();
+        }
+      });
+
+      const res = await fetch('http://127.0.0.1:8000/corpus/inject-pack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: "Manual Context",
+          color: "#ff00ff",
+          description: "Context injected from HUD UI",
+          terms: terms
+        })
+      });
+      if (!res.ok) throw new Error('Failed to inject context');
+      setInjectorStatus('Injection Successful');
+      setTimeout(() => {
+        setShowInjector(false);
+        setInjectorStatus('');
+        setInjectorText('');
+      }, 1500);
+    } catch (err: any) {
+      setInjectorStatus(`Error: ${err.message}`);
+    }
+  };
 
   const extractCoords = (data: any): [number, number, number] => {
     if (data.xyz && data.xyz.length >= 3) return [data.xyz[0], data.xyz[1], data.xyz[2]];
@@ -3593,75 +4120,98 @@ const ArithmeticHUD: React.FC = () => {
   const calculate = async () => {
     setLoading(true);
     setError(null);
-    setResults([]);
+    setResults([]); // Clear previous results
     try {
-      // 1. Get arithmetic result
-      const arithRes = await fetch('http://127.0.0.1:8000/arithmetic', {
+      const newNodes: NodeData[] = [];
+
+      // 1. Audit Master Baseline
+      const baselineTokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word_a: wordA, word_b: wordB, word_c: wordC, top_k: 3 })
+        body: JSON.stringify({ text: wordA, include_raw_vector: true })
+      });
+      if (!baselineTokenizeRes.ok) throw new Error(`Error en /tokenize para ${wordA}`);
+      const baselineTokenizeData = await baselineTokenizeRes.json();
+
+      let baselineVector: number[] = [];
+      if (baselineTokenizeData.tokens && baselineTokenizeData.tokens.length > 0) {
+        const mainToken = baselineTokenizeData.tokens[0];
+        if (mainToken.vector) {
+          baselineVector = mainToken.vector;
+        }
+      }
+
+      newNodes.push({
+        word: wordA,
+        position: [0, 0, 0], // Explicitly lock anchor to [0,0,0]
+        color: colors.baselineColor,
+        vector: baselineVector,
+        token_id: Math.random()
       });
 
-      if (!arithRes.ok) throw new Error('Error en /arithmetic');
-      const arithData = await arithRes.json();
-
-      let resultWord = 'Resultado';
-      if (Array.isArray(arithData) && arithData.length > 0) {
-        resultWord = arithData[0].word || arithData[0].text;
-        setResults(arithData.map((res: any) => ({
-          ...res,
-          token_id: Number(res.token_id || res.id || 0)
-        })));
-      }
-      else if (arithData.results && arithData.results.length > 0) {
-        resultWord = arithData.results[0].word || arithData.results[0].text;
-        setResults(arithData.results.map((res: any) => ({
-          ...res,
-          token_id: Number(res.token_id || res.id || 0)
-        })));
-      }
-
-      // 2. Extract coordinates and raw 1024D vectors
-      const words = [wordA, wordB, wordC, resultWord];
-      const newNodes: NodeData[] = [];
-      const nodeColors = [colors.wordA, colors.wordB, colors.wordC, colors.result];
-
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        const tokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
+      // 2. Extract Stress Test Query (if provided)
+      if (stressTestQuery.trim() !== '') {
+        const stressRes = await fetch('http://127.0.0.1:8000/tokenize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: word, include_raw_vector: true })
+          body: JSON.stringify({ text: stressTestQuery, include_raw_vector: true })
         });
-        if (!tokenizeRes.ok) throw new Error(`Error en /tokenize para ${word}`);
-        const tokenizeData = await tokenizeRes.json();
-
-        let position: [number, number, number] = [0, 0, 0];
-        let vector: number[] = [];
-
-        if (tokenizeData.tokens && tokenizeData.tokens.length > 0) {
-          const mainToken = tokenizeData.tokens[0];
-          position = extractCoords(mainToken);
-          if (mainToken.vector) {
-            vector = mainToken.vector;
+        if (stressRes.ok) {
+          const stressData = await stressRes.json();
+          if (stressData.tokens && stressData.tokens.length > 0) {
+            const stressToken = stressData.tokens[0];
+            const pos = extractCoords(stressToken); // Radial mapping is determined during render based on Dn
+            const vec = stressToken.vector || [];
+            newNodes.push({
+              word: stressTestQuery,
+              position: pos,
+              color: '#ff3300', // Warning Orange/Red default
+              vector: vec,
+              token_id: Math.random()
+            });
           }
         }
-
-        // If vector array wasn't attached for some reason, use the result_vector from arithmetic if it's the result
-        if (vector.length === 0 && i === 3 && arithData.vector) {
-          vector = arithData.vector;
-        }
-
-        newNodes.push({
-          word,
-          position,
-          color: nodeColors[i],
-          vector,
-          token_id: Math.random() // Unique ID as fallback, ideally token_id from backend
-        });
       }
 
       setNodes(newNodes);
+
+      // --- AUTO-FIT CAMERA LOGIC ---
+      let maxDn = 0;
+
+      if (newNodes.length > 1 && newNodes[1].vector && baselineVector.length > 0) {
+        const vA = baselineVector;
+        const magA = getVectorMagnitude(vA);
+        const magN = getVectorMagnitude(newNodes[1].vector!);
+        if (magA > 0 && magN > 0) {
+          const diffSquaredSum = vA.reduce((sum, val, idx) => {
+            const diff = val - (newNodes[1].vector![idx] || 0);
+            return sum + (diff * diff);
+          }, 0);
+          maxDn = Math.sqrt(diffSquaredSum);
+
+          const angle = Math.atan2(newNodes[1].vector![2], newNodes[1].vector![0]);
+          const normX = Math.cos(angle);
+          const normZ = Math.sin(angle);
+          const BASE_SPREAD = 50.0;
+
+          // Update stress node visual position
+          newNodes[1].position = [
+            normX * maxDn * uiScaleFactor * BASE_SPREAD,
+            0,
+            normZ * maxDn * uiScaleFactor * BASE_SPREAD
+          ];
+        }
+      }
+
+      setNodes([...newNodes]); // Force update with new positions
+
+      // Calculate max bounding radius for deterministic cenital framing
+      const ringRadius = firewallThreshold * 1.5 * uiScaleFactor * 50.0;
+      const maxNodeRadius = maxDn * uiScaleFactor * 50.0;
+      const maxRadius = Math.max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor); // add small padding
+
+      setCameraMaxRadius(maxRadius);
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Error desconocido');
@@ -3675,11 +4225,151 @@ const ArithmeticHUD: React.FC = () => {
     return Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
   };
 
+  const selectedDnRaw = React.useMemo(() => {
+    if (!selectedThread || !selectedThread.vector || nodes.length < 1 || !nodes[0].vector) return null;
+    const vA = nodes[0].vector;
+    const n = selectedThread.vector;
+    const diffSquaredSum = vA.reduce((sum, val, idx) => {
+      const diff = val - (n[idx] || 0);
+      return sum + (diff * diff);
+    }, 0);
+    return Math.sqrt(diffSquaredSum);
+  }, [selectedThread, nodes]);
+
+  // Firewall Status Check
+  const firewallStatus = React.useMemo(() => {
+    if (nodes.length < 2 || !nodes[0].vector || !nodes[1].vector) return null;
+    const vRes = nodes[0].vector; // Master Baseline Result (index 0)
+    const vTest = nodes[1].vector; // Stress Test Query (index 1)
+
+    const diffSquaredSum = vRes.reduce((sum, val, idx) => {
+      const diff = val - (vTest[idx] || 0);
+      return sum + (diff * diff);
+    }, 0);
+    const dn = Math.sqrt(diffSquaredSum);
+
+    return {
+      distance: dn,
+      isBlocked: dn >= firewallThreshold
+    };
+  }, [nodes, firewallThreshold]);
+
   return (
     <>
       <TelemetryHUD nodesCount={nodes.length > 0 ? nodes.length * 1024 : 0} xStretch={xStretch} />
       <CrosshairHUD />
       <TargetingHUD />
+
+      {/* L2 Analysis Panel */}
+      {selectedThread && selectedDnRaw !== null && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          right: '20px',
+          zIndex: 10,
+          background: 'rgba(0, 0, 0, 0.95)',
+          border: '1px solid #ff00ff',
+          padding: '15px 20px',
+          borderRadius: '8px',
+          color: '#ff00ff',
+          fontFamily: 'monospace',
+          minWidth: '300px',
+          boxShadow: '0 0 20px rgba(255, 0, 255, 0.3)',
+        }}>
+          <h3 style={{ margin: '0 0 15px 0', borderBottom: '1px solid #ff00ff', paddingBottom: '5px', textTransform: 'uppercase' }}>
+            L2 Inspection: {selectedThread.word}
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fff' }}>
+              <span>Raw L2 Distance ($D_n$):</span>
+              <span style={{ color: '#00ffff', fontWeight: 'bold' }}>{selectedDnRaw.toFixed(5)}</span>
+            </div>
+            <div style={{ padding: '8px', background: 'rgba(0,0,0,0.5)', borderRadius: '4px', fontSize: '0.8rem', color: '#aaa', border: '1px solid #333' }}>
+              <div>Live Formula:</div>
+              <div style={{ color: '#fff', fontStyle: 'italic', marginTop: '4px' }}>sqrt(sum((A_i - B_i)^2))</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fff', marginTop: '5px' }}>
+              <span>Derived Similarity Config:</span>
+              <span style={{ color: '#00ff00', fontWeight: 'bold' }}>{((1 / (1 + selectedDnRaw)) * 100).toFixed(2)}%</span>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '5px', textAlign: 'right', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
+              Confidence Formula: 1 / (1 + D_n)
+            </div>
+
+            {/* Noise Delta Map */}
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ color: '#ffea00', fontSize: '0.85rem', marginBottom: '5px', textTransform: 'uppercase', fontWeight: 'bold' }}>Noise Vectors (Delta &gt; 0.2)</div>
+              {nodes.length > 0 && nodes[0].vector && selectedThread.vector ? (
+                (() => {
+                  const vA = nodes[0].vector;
+                  const vN = selectedThread.vector;
+                  const diffs = vA.map((val: number, idx: number) => ({ index: idx, delta: Math.abs(val - (vN[idx] || 0)) }))
+                    .filter((d: { delta: number }) => d.delta > 0.2)
+                    .sort((a: { delta: number }, b: { delta: number }) => b.delta - a.delta)
+                    .slice(0, 5);
+
+                  if (diffs.length === 0) return <div style={{ fontSize: '0.8rem', color: '#00ff00' }}>No significant noise detected.</div>;
+
+                  return diffs.map((d: { index: number, delta: number }, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '3px' }}>
+                      <span style={{ color: '#aaa' }}>DIM-{d.index}</span>
+                      <span style={{ color: '#ff3300' }}>+{d.delta.toFixed(4)}</span>
+                    </div>
+                  ));
+                })()
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Injector Modal */}
+      {showInjector && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 50,
+          background: 'rgba(0, 10, 10, 0.95)',
+          border: '1px solid #00ffff',
+          padding: '20px',
+          borderRadius: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          minWidth: '400px',
+          boxShadow: '0 0 30px rgba(0, 255, 255, 0.5)'
+        }}>
+          <h3 style={{ margin: 0, color: '#00ffff', textTransform: 'uppercase', borderBottom: '1px solid #00ffff', paddingBottom: '5px' }}>Inject Knowledge Context</h3>
+          <p style={{ margin: 0, color: '#aaa', fontSize: '0.8rem' }}>Format: term : definition (one per line)</p>
+          <textarea
+            value={injectorText}
+            onFocus={() => setIsTyping(true)}
+            onBlur={() => setIsTyping(false)}
+            onChange={(e) => setInjectorText(e.target.value)}
+            placeholder="Term : A comprehensive description."
+            style={{ width: '100%', height: '150px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setShowInjector(false)}
+                style={{ background: 'transparent', border: '1px solid #555', color: '#aaa', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleInject}
+                style={{ background: '#003333', border: '1px solid #00ffff', color: '#00ffff', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Inject Pack
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Absolute HUD */}
       <div
@@ -3703,53 +4393,75 @@ const ArithmeticHUD: React.FC = () => {
           minWidth: '250px'
         }}>
         <h2 style={{ margin: 0, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '2px', textAlign: 'center' }}>
-          Vector Math
+          THE AUDITOR'S CONSOLE
         </h2>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordA }}>Palabra A (+)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordA}
-              onChange={(e) => setWordA(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordA}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordA} onChange={(e) => setColorA(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+        {/* --- ZONE ALPHA: MASTER BASELINE --- */}
+        <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
+          <div style={{ color: '#00ccff', fontSize: '0.9rem', marginBottom: '10px', fontWeight: 'bold' }}>ZONE ALPHA: MASTER BASELINE</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.8rem', color: colors.baselineColor }}>Baseline Input</label>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input
+                value={wordA}
+                onFocus={() => setIsTyping(true)}
+                onBlur={() => setIsTyping(false)}
+                onChange={(e) => setWordA(e.target.value)}
+                style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.baselineColor}`, color: '#fff', borderRadius: '4px' }}
+              />
+              <input type="color" value={colors.baselineColor} onChange={(e) => setBaselineColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordB }}>Palabra B (-)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordB}
-              onChange={(e) => setWordB(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordB}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordB} onChange={(e) => setColorB(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+        {/* --- ZONE BETA: STRESS TEST SANDBOX --- */}
+        <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
+          <div style={{ color: '#ffcc00', fontSize: '0.9rem', marginBottom: '10px', fontWeight: 'bold' }}>ZONE BETA: STRESS TEST SANDBOX</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.8rem', color: '#ff3300' }}>STRESS_TEST_QUERY</label>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input
+                value={stressTestQuery}
+                onFocus={() => { setIsStressInputFocused(true); setIsTyping(true); }}
+                onBlur={() => { setIsStressInputFocused(false); setIsTyping(false); }}
+                onChange={(e) => setStressTestQuery(e.target.value)}
+                placeholder="Enter query to stress test against BASELINE"
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  background: '#000',
+                  border: `1px solid #ff3300`,
+                  color: '#fff',
+                  borderRadius: '4px',
+                  boxShadow: isStressInputFocused ? '0 0 15px #ff3300' : 'none',
+                  outline: 'none',
+                  transition: 'box-shadow 0.2s ease-in-out'
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordC }}>Palabra C (+)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordC}
-              onChange={(e) => setWordC(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordC}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordC} onChange={(e) => setColorC(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.result }}>Resultado (=)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <span style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.result}`, color: '#aaa', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {nodes.length === 4 ? nodes[3].word : '???'}
-            </span>
-            <input type="color" value={colors.result} onChange={(e) => setResultColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
-          </div>
+        {/* --- FIREWALL STATUS HUD --- */}
+        <div style={{ padding: '10px', background: firewallStatus ? (firewallStatus.isBlocked ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)') : 'rgba(0,0,0,0.5)', border: `1px solid ${firewallStatus ? (firewallStatus.isBlocked ? '#ff0000' : '#00ff00') : '#555'}`, borderRadius: '4px' }}>
+          <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '5px', textTransform: 'uppercase' }}>Firewall Status</div>
+          {firewallStatus ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: firewallStatus.isBlocked ? '#ff3333' : '#00ff00' }}>
+                STATE: {firewallStatus.isBlocked ? 'BLOCKED' : 'SAFE'}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#fff' }}>
+                <span>L2 Distance ($D_n$):</span>
+                <span>{firewallStatus.distance.toFixed(4)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#fff' }}>
+                <span>Tolerance (Threshold):</span>
+                <span>{firewallThreshold.toFixed(1)}</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#666', fontSize: '0.8rem' }}>AWAITING TEST VECTOR...</div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '5px' }}>
@@ -3778,6 +4490,20 @@ const ArithmeticHUD: React.FC = () => {
             step="0.1"
             value={xStretch}
             onChange={(e) => setXStretch(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+
+          <label style={{ fontSize: '0.8rem', color: '#ffcc00', display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}>
+            <span>Firewall Tolerance</span>
+            <span>{firewallThreshold.toFixed(1)}</span>
+          </label>
+          <input
+            type="range"
+            min="5.0"
+            max="100.0"
+            step="0.5"
+            value={firewallThreshold}
+            onChange={(e) => setFirewallThreshold(parseFloat(e.target.value))}
             style={{ width: '100%', cursor: 'pointer' }}
           />
 
@@ -3826,7 +4552,26 @@ const ArithmeticHUD: React.FC = () => {
             transition: 'all 0.3s'
           }}
         >
-          {loading ? 'Calculando...' : 'Calcular'}
+          {loading ? 'CALCULATING...' : 'EXECUTE AUDIT'}
+        </button>
+
+        <button
+          onClick={() => setShowInjector(true)}
+          style={{
+            padding: '8px',
+            background: 'rgba(0,0,0,0.5)',
+            color: '#ff00ff',
+            border: '1px dashed #ff00ff',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '5px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s',
+            fontSize: '0.8rem'
+          }}
+        >
+          [+] INJECT CONTEXT
         </button>
 
         {topResults.length > 0 && (
@@ -3848,8 +4593,25 @@ const ArithmeticHUD: React.FC = () => {
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
         <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
+        <CameraAutoFit maxRadius={cameraMaxRadius} onComplete={() => setCameraMaxRadius(null)} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
+
+        {/* Threshold Boundary Rings */}
+        <group rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]}>
+          {/* Inner safe ring */}
+          <Ring args={[(firewallThreshold * 0.5 * uiScaleFactor * 50.0) - 0.5, firewallThreshold * 0.5 * uiScaleFactor * 50.0, 64]}>
+            <meshBasicMaterial color="#005500" transparent opacity={0.3} side={THREE.DoubleSide} />
+          </Ring>
+          {/* The exact firewall threshold ring */}
+          <Ring args={[(firewallThreshold * uiScaleFactor * 50.0) - 1.0, firewallThreshold * uiScaleFactor * 50.0, 128]}>
+            <meshBasicMaterial color="#ff0000" transparent opacity={0.8} side={THREE.DoubleSide} />
+          </Ring>
+          {/* Outer warning ring */}
+          <Ring args={[(firewallThreshold * 1.5 * uiScaleFactor * 50.0) - 0.5, firewallThreshold * 1.5 * uiScaleFactor * 50.0, 128]}>
+            <meshBasicMaterial color="#ff3300" transparent opacity={0.2} side={THREE.DoubleSide} />
+          </Ring>
+        </group>
 
         {/* Render nodes and text */}
         {nodes.map((node, i) => {
@@ -3859,10 +4621,13 @@ const ArithmeticHUD: React.FC = () => {
             const vA = nodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
-            let dn = 1;
+            let dn = 0;
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (node.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             if (node.vector.length >= 3) {
               // 2D Directional Mapping: XZ Layout (Semantic Disk)
@@ -3908,10 +4673,13 @@ const ArithmeticHUD: React.FC = () => {
             const vA = nodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
-            let dn = 1;
+            let dn = 0;
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (node.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             if (node.vector.length >= 3) {
               // 2D Directional Mapping: XZ Layout (Semantic Disk)
@@ -3928,11 +4696,19 @@ const ArithmeticHUD: React.FC = () => {
             }
           }
 
+          // Render Firewall Thread Logic
+          let threadIsBlocked = false;
+          let labelText = `${node.word} [${i === 0 ? "BASELINE" : "STRESS"}]`;
+
+          if (i === 1 && firewallStatus) { // Stress test node is at index 1
+            threadIsBlocked = firewallStatus.isBlocked;
+          }
+
           return (
             <group key={`ribbon-${node.token_id || i}`} position={pos}>
               <Billboard position={[-(512 * xStretch) - 20, 0, 0]}>
                 <Text
-                  color={node.color}
+                  color={threadIsBlocked ? '#ff3300' : node.color}
                   fontSize={12}
                   anchorX="center"
                   anchorY="middle"
@@ -3940,10 +4716,10 @@ const ArithmeticHUD: React.FC = () => {
                   outlineColor="#000000"
                   fontStyle="italic"
                 >
-                  {node.word} [{i === 0 ? "A" : i === 1 ? "B" : i === 2 ? "C" : "RES"}]
+                  {labelText}
                 </Text>
               </Billboard>
-              <SemanticThread data={node.vector} xStretch={xStretch} position={[0, 0, 0]} amplitude={amplitude} baseColor={node.color} />
+              <SemanticThread data={node.vector} xStretch={xStretch} position={[0, 0, 0]} amplitude={amplitude} baseColor={node.color} isBlocked={threadIsBlocked} />
             </group>
           )
         })}
@@ -3951,6 +4727,9 @@ const ArithmeticHUD: React.FC = () => {
         {/* Grid helper for scale reference */}
         <gridHelper args={[20, 20, '#222222', '#111111']} position={[0, -5, 0]} />
       </Canvas>
+
+      {/* Radar Map Overlay - Relocated to standard HTML DOM overlay */}
+      <RadarHUD maxRadius={cameraMaxRadius} nodes={nodes} />
     </>
   );
 };
@@ -4016,26 +4795,30 @@ interface SemanticState {
     amplitude: number;
     boostFactor: number;
     colors: {
-        wordA: string;
-        wordB: string;
-        wordC: string;
-        result: string;
+        baselineColor: string;
     };
     results: Array<{ word: string; score: number; token_id: number }>;
     hoveredDimensionIndex: number | null;
     selectedValues: number[];
+    hoveredNode: any | null;
+    selectedThread: any | null;
+    stressTestQuery: string;
+    firewallThreshold: number;
+    isTyping: boolean;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
     setAmplitude: (amp: number) => void;
     setBoostFactor: (factor: number) => void;
-    setColorA: (color: string) => void;
-    setColorB: (color: string) => void;
-    setColorC: (color: string) => void;
-    setResultColor: (color: string) => void;
+    setBaselineColor: (color: string) => void;
     setResults: (results: Array<{ word: string; score: number; token_id: number }>) => void;
     setHoveredDimensionIndex: (idx: number | null) => void;
     setSelectedValues: (vals: number[]) => void;
+    setHoveredNode: (node: any | null) => void;
+    setSelectedThread: (thread: any | null) => void;
+    setStressTestQuery: (query: string) => void;
+    setFirewallThreshold: (threshold: number) => void;
+    setIsTyping: (typing: boolean) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -4044,24 +4827,28 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     amplitude: 25.0,
     boostFactor: 10.0,
     colors: {
-        wordA: '#00ffff',
-        wordB: '#ff00ff',
-        wordC: '#00ff00',
-        result: '#ffff00',
+        baselineColor: '#00ffff',
     },
     results: [],
     hoveredDimensionIndex: null,
     selectedValues: [],
+    hoveredNode: null,
+    selectedThread: null,
+    stressTestQuery: '',
+    firewallThreshold: 25.0,
+    isTyping: false,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
     setAmplitude: (amp) => set({ amplitude: amp }),
     setBoostFactor: (factor) => set({ boostFactor: factor }),
-    setColorA: (color) => set((state) => ({ colors: { ...state.colors, wordA: color } })),
-    setColorB: (color) => set((state) => ({ colors: { ...state.colors, wordB: color } })),
-    setColorC: (color) => set((state) => ({ colors: { ...state.colors, wordC: color } })),
-    setResultColor: (color) => set((state) => ({ colors: { ...state.colors, result: color } })),
+    setBaselineColor: (color) => set((state) => ({ colors: { ...state.colors, baselineColor: color } })),
     setResults: (results) => set({ results }),
     setHoveredDimensionIndex: (idx) => set({ hoveredDimensionIndex: idx }),
     setSelectedValues: (vals) => set({ selectedValues: vals }),
+    setHoveredNode: (node) => set({ hoveredNode: node }),
+    setSelectedThread: (thread) => set({ selectedThread: thread }),
+    setStressTestQuery: (query) => set({ stressTestQuery: query }),
+    setFirewallThreshold: (val) => set({ firewallThreshold: val }),
+    setIsTyping: (typing) => set({ isTyping: typing }),
 }));

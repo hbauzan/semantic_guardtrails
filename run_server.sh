@@ -6,6 +6,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "🧹 Clearing Vite and Build caches..."
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.vite"
 rm -rf "$PROJECT_ROOT/frontend/node_modules/.cache"
+rm -rf "$PROJECT_ROOT/frontend/dist"
 
 # 1. Limpieza de Puertos
 PID=$(lsof -ti :$PORT || true)

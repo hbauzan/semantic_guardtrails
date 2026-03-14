@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Sphere, Text, PointerLockControls, Billboard } from '@react-three/drei';
+import { Sphere, Text, PointerLockControls, Billboard, Ring } from '@react-three/drei';
 import * as THREE from 'three';
 import { useKeyboardControls } from '../hooks/useKeyboardControls';
 import { SemanticThread } from './SemanticThread';
@@ -23,10 +23,24 @@ const FlightControls: React.FC = () => {
   useEffect(() => {
     const handleFocus = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      // Only blur if clicking directly on the canvas (Drei handles PointerLock internally)
+      // Only blur if clicking directly on the canvas
       if (target.tagName === 'CANVAS') {
         if (document.activeElement && document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
+        }
+
+        const isCurrentlyTyping = useSemanticStore.getState().isTyping;
+        if (isCurrentlyTyping) return;
+
+        if (controlsRef.current && controlsRef.current.lock) {
+          try {
+            const promise = controlsRef.current.lock();
+            if (promise && promise.catch) {
+              promise.catch(() => { }); // Gracefully swallow lingering SecurityError
+            }
+          } catch (err) {
+            // Ignore synchronous errors
+          }
         }
       }
     };
@@ -34,6 +48,10 @@ const FlightControls: React.FC = () => {
     document.addEventListener('mousedown', handleFocus);
     return () => document.removeEventListener('mousedown', handleFocus);
   }, []);
+
+  // We explicitly manage PointerLockControls by keeping it enabled for mouse movement,
+  // but we prevent its default spammy auto-lock by passing a non-existent selector.
+  const isTyping = useSemanticStore(state => state.isTyping);
 
   useFrame((state, delta) => {
     // 1. Inertia (Damping)
@@ -56,9 +74,9 @@ const FlightControls: React.FC = () => {
       inputVector.normalize();
     }
 
-    // 4. Apply Acceleration relative to Camera Orientation
+    // 4. Apply Logarithmic Acceleration relative to Camera Orientation
     inputVector.applyEuler(state.camera.rotation);
-    const effectiveAccel = BASE_ACCEL * currentBoost;
+    const effectiveAccel = BASE_ACCEL * Math.pow(1.05, currentBoost);
 
     if (isBoosting) {
       if (inputVector.lengthSq() > 0) {
@@ -74,7 +92,9 @@ const FlightControls: React.FC = () => {
     state.camera.position.add(velocity.current);
   });
 
-  return <PointerLockControls ref={controlsRef} makeDefault />;
+  // enabled={!isTyping} allows mouse movement when not typing
+  // selector="#prevent-default-click" ensures Drei doesn't bind its own click listener to document
+  return <PointerLockControls ref={controlsRef} makeDefault enabled={!isTyping} selector="#prevent-default-click" />;
 };
 
 type NodeData = {
@@ -157,6 +177,11 @@ const TargetingHUD: React.FC = () => {
 
   if (index === null) return null;
 
+  const baselineA = values.length >= 1 ? values[0] : 0;
+  const targetN = values.length >= 2 ? values[1] : 0; // The actual target hovered right now
+  // We compute delta for the specific dimension
+  const delta = Math.abs(baselineA - targetN);
+
   return (
     <div style={{
       position: 'absolute',
@@ -181,10 +206,11 @@ const TargetingHUD: React.FC = () => {
         DIM-ID: {index}
       </div>
       <div style={{ color: '#aaa', fontSize: '0.75rem', marginBottom: '2px' }}>MAGNITUDE</div>
-      {values.length >= 1 && <div style={{ color: colors.wordA }}>A: {values[0].toFixed(4)}</div>}
-      {values.length >= 2 && <div style={{ color: colors.wordB }}>B: {values[1].toFixed(4)}</div>}
-      {values.length >= 3 && <div style={{ color: colors.wordC }}>C: {values[2].toFixed(4)}</div>}
-      {values.length >= 4 && <div style={{ color: colors.result }}>RES: {values[3].toFixed(4)}</div>}
+      {values.length >= 1 && <div style={{ color: colors.baselineColor }}>A_i: {baselineA.toFixed(4)}</div>}
+      <div style={{ color: '#00ccff' }}>B_i (Input): {targetN.toFixed(4)}</div>
+      <div style={{ color: '#ff3333', marginTop: '2px', borderTop: '1px solid #444', paddingTop: '2px' }}>
+        Abs Error: {delta.toFixed(4)}
+      </div>
     </div>
   );
 };
@@ -194,10 +220,29 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
   const { camera } = useThree();
   const setHoveredDimensionIndex = useSemanticStore(state => state.setHoveredDimensionIndex);
   const setSelectedValues = useSemanticStore(state => state.setSelectedValues);
+  const setHoveredNode = useSemanticStore(state => state.setHoveredNode);
+  const setSelectedThread = useSemanticStore(state => state.setSelectedThread);
+
+  useEffect(() => {
+    const handleMouseClick = () => {
+      if (document.pointerLockElement) {
+        // We are locked and looking around...
+        const hoveredNode = useSemanticStore.getState().hoveredNode;
+        if (hoveredNode) {
+          setSelectedThread(hoveredNode);
+        } else {
+          setSelectedThread(null);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleMouseClick);
+    return () => document.removeEventListener('mousedown', handleMouseClick);
+  }, [setSelectedThread]);
 
   useFrame(() => {
-    if (nodes.length < 4) {
+    if (nodes.length < 2) { // Only need baseline and stress test nodes
       setHoveredDimensionIndex(null);
+      setHoveredNode(null);
       return;
     }
 
@@ -223,10 +268,13 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
             const vA = nodes[0].vector;
             const magA = Math.sqrt(vA.reduce((sum, val) => sum + val * val, 0));
             const magN = Math.sqrt(n.vector.reduce((sum, val) => sum + val * val, 0));
-            let dn = 1;
+            let dn = 0; // default to 0 for Euclidean
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (n.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (n.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             const angle = Math.atan2(n.vector[2], n.vector[0]);
             posX = Math.cos(angle) * dn * uiScaleFactor * 50.0;
@@ -244,9 +292,14 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
         if (closestNodeIdx !== -1 && minZDist < 10.0) {
           let targetedIndex = Math.round(((hitPoint.x - closestPosX) / xStretch) + 512);
 
+          setHoveredNode(nodes[closestNodeIdx]);
+
           if (targetedIndex >= 0 && targetedIndex < 1024) {
             setHoveredDimensionIndex(targetedIndex);
-            const values = nodes.map(n => (n.vector && n.vector.length > targetedIndex) ? n.vector[targetedIndex] : 0);
+            const values = [
+              nodes[0]?.vector && nodes[0].vector.length > targetedIndex ? nodes[0].vector[targetedIndex] : 0, // baseline A
+              nodes[closestNodeIdx]?.vector && nodes[closestNodeIdx].vector!.length > targetedIndex ? nodes[closestNodeIdx].vector![targetedIndex] : 0 // current target layer B
+            ];
             setSelectedValues(values);
             return;
           }
@@ -254,29 +307,161 @@ const ProbeSystem: React.FC<{ nodes: NodeData[], xStretch: number, uiScaleFactor
       }
     }
 
+    setHoveredNode(null);
     setHoveredDimensionIndex(null);
   });
 
   return null;
 };
 
+const CameraAutoFit: React.FC<{ maxRadius: number | null, onComplete: () => void }> = ({ maxRadius, onComplete }) => {
+  const { controls } = useThree();
+  const [animating, setAnimating] = useState(false);
+
+  useEffect(() => {
+    if (maxRadius !== null && maxRadius > 0) {
+      setAnimating(true);
+    }
+  }, [maxRadius]);
+
+  useFrame((state, delta) => {
+    if (!animating || maxRadius === null) return;
+
+    // Cenital View Deterministic Framing
+    const targetPos = new THREE.Vector3(0, maxRadius * 1.5, maxRadius * 0.5);
+    const targetLookAt = new THREE.Vector3(0, 0, 0);
+
+    // Lerp camera position
+    state.camera.position.lerp(targetPos, delta * 2.5);
+
+    // Depending on if PointerLock is engaged, updating lookAt can conflict.
+    // If we have OrbitControls, we update target. If no specific controls block it, we lookAt.
+    if (controls && (controls as any).target) {
+      (controls as any).target.lerp(targetLookAt, delta * 2.5);
+    } else {
+      // Attempt smoothing
+      const currentTarget = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion).add(state.camera.position);
+      currentTarget.lerp(targetLookAt, delta * 2.5);
+      state.camera.lookAt(currentTarget);
+    }
+
+    // Stop animating when close enough
+    if (state.camera.position.distanceTo(targetPos) < 1.0) {
+      setAnimating(false);
+      state.camera.position.copy(targetPos);
+      state.camera.lookAt(targetLookAt);
+      onComplete();
+    }
+  });
+
+  return null;
+};
+
+const RadarHUD: React.FC<{ nodes: NodeData[], maxRadius: number | null }> = ({ nodes, maxRadius }) => {
+  const firewallThreshold = useSemanticStore(state => state.firewallThreshold);
+  const uiScaleFactor = useSemanticStore(state => state.uiScaleFactor);
+
+  if (!maxRadius || maxRadius <= 0) return null;
+
+  const radarSize = 200;
+  const center = radarSize / 2;
+  const scale = (radarSize / 2 - 10) / maxRadius; // 10px padding
+
+  const ringRadius = firewallThreshold * 1.5 * uiScaleFactor * 50.0 * scale;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: '20px',
+      right: '20px',
+      width: `${radarSize}px`,
+      height: `${radarSize}px`,
+      borderRadius: '50%',
+      background: 'rgba(0, 20, 20, 0.6)',
+      border: '2px solid #00ffff',
+      boxShadow: '0 0 15px rgba(0, 255, 255, 0.3)',
+      zIndex: 10,
+      pointerEvents: 'none'
+    }}>
+      <svg width={radarSize} height={radarSize} style={{ position: 'absolute', top: 0, left: 0 }}>
+        {/* Crosshairs */}
+        <line x1={center} y1="0" x2={center} y2={radarSize} stroke="rgba(0, 255, 255, 0.3)" strokeWidth="1" />
+        <line x1="0" y1={center} x2={radarSize} y2={center} stroke="rgba(0, 255, 255, 0.3)" strokeWidth="1" />
+
+        {/* Firewall Boundary */}
+        <circle cx={center} cy={center} r={ringRadius} fill="none" stroke="#ff0000" strokeWidth="2" strokeDasharray="4 4" />
+
+        {/* Nodes */}
+        {nodes.map((node, idx) => {
+          const cx = center + node.position[0] * scale;
+          const cy = center + node.position[2] * scale;
+          const isMaster = idx === 0;
+          return (
+            <circle
+              key={idx}
+              cx={cx}
+              cy={cy}
+              r={isMaster ? 4 : 3}
+              fill={node.color}
+              stroke={isMaster ? '#fff' : '#000'}
+              strokeWidth="1"
+            />
+          );
+        })}
+      </svg>
+      <div style={{
+        position: 'absolute',
+        top: '-20px',
+        width: '100%',
+        textAlign: 'center',
+        color: '#00ffff',
+        fontSize: '0.75rem',
+        fontFamily: 'monospace',
+        textTransform: 'uppercase'
+      }}>Tactical Radar</div>
+    </div>
+  );
+};
+
 
 const ArithmeticHUD: React.FC = () => {
   // Suppress THREE.Clock deprecation warning caused by React Three Fiber internals
+  // and SecurityError from pointer lock without gesture
   useEffect(() => {
     const origWarn = console.warn;
     console.warn = (...args) => {
       if (typeof args[0] === 'string' && args[0].includes('THREE.Clock: This module has been deprecated')) return;
       origWarn(...args);
     };
+
+    const origError = console.error;
+    console.error = (...args) => {
+      if (args.length > 0 && args[0] instanceof DOMException && args[0].name === 'SecurityError') {
+        // Suppress PointerLock SecurityError spam
+        return;
+      }
+      origError(...args);
+    }
+
+    // Global error listener for unhandled rejections related to pointer lock
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      if (e.reason && e.reason.name === 'SecurityError') {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('unhandledrejection', handleRejection);
+
     return () => {
       console.warn = origWarn;
+      console.error = origError;
+      window.removeEventListener('unhandledrejection', handleRejection);
     };
   }, []);
 
   const [wordA, setWordA] = useState('rey');
-  const [wordB, setWordB] = useState('hombre');
-  const [wordC, setWordC] = useState('mujer');
+  const [showInjector, setShowInjector] = useState(false);
+  const [injectorText, setInjectorText] = useState('');
+  const [injectorStatus, setInjectorStatus] = useState('');
 
   const uiScaleFactor = useSemanticStore((state) => state.uiScaleFactor);
   const setUiScaleFactor = useSemanticStore((state) => state.setUiScaleFactor);
@@ -287,18 +472,61 @@ const ArithmeticHUD: React.FC = () => {
   const boostFactor = useSemanticStore((state) => state.boostFactor);
   const setBoostFactor = useSemanticStore((state) => state.setBoostFactor);
 
+  const stressTestQuery = useSemanticStore((state) => state.stressTestQuery);
+  const setStressTestQuery = useSemanticStore((state) => state.setStressTestQuery);
+  const firewallThreshold = useSemanticStore((state) => state.firewallThreshold);
+  const setFirewallThreshold = useSemanticStore((state) => state.setFirewallThreshold);
+  const setIsTyping = useSemanticStore((state) => state.setIsTyping);
+
   const colors = useSemanticStore((state) => state.colors);
-  const setColorA = useSemanticStore((state) => state.setColorA);
-  const setColorB = useSemanticStore((state) => state.setColorB);
-  const setColorC = useSemanticStore((state) => state.setColorC);
-  const setResultColor = useSemanticStore((state) => state.setResultColor);
+  const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
 
   const topResults = useSemanticStore((state) => state.results);
   const setResults = useSemanticStore((state) => state.setResults);
+  const selectedThread = useSemanticStore(state => state.selectedThread);
 
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [cameraMaxRadius, setCameraMaxRadius] = useState<number | null>(null);
+
+  const [isStressInputFocused, setIsStressInputFocused] = useState(false);
+
+  const handleInject = async () => {
+    if (!injectorText.trim()) return;
+    setInjectorStatus('Injecting...');
+    try {
+      const lines = injectorText.split('\n');
+      const terms: Record<string, string> = {};
+      lines.forEach(line => {
+        if (line.includes(':')) {
+          const [k, v] = line.split(':');
+          terms[k.trim()] = v.trim();
+        }
+      });
+
+      const res = await fetch('http://127.0.0.1:8000/corpus/inject-pack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: "Manual Context",
+          color: "#ff00ff",
+          description: "Context injected from HUD UI",
+          terms: terms
+        })
+      });
+      if (!res.ok) throw new Error('Failed to inject context');
+      setInjectorStatus('Injection Successful');
+      setTimeout(() => {
+        setShowInjector(false);
+        setInjectorStatus('');
+        setInjectorText('');
+      }, 1500);
+    } catch (err: any) {
+      setInjectorStatus(`Error: ${err.message}`);
+    }
+  };
 
   const extractCoords = (data: any): [number, number, number] => {
     if (data.xyz && data.xyz.length >= 3) return [data.xyz[0], data.xyz[1], data.xyz[2]];
@@ -312,75 +540,98 @@ const ArithmeticHUD: React.FC = () => {
   const calculate = async () => {
     setLoading(true);
     setError(null);
-    setResults([]);
+    setResults([]); // Clear previous results
     try {
-      // 1. Get arithmetic result
-      const arithRes = await fetch('http://127.0.0.1:8000/arithmetic', {
+      const newNodes: NodeData[] = [];
+
+      // 1. Audit Master Baseline
+      const baselineTokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word_a: wordA, word_b: wordB, word_c: wordC, top_k: 3 })
+        body: JSON.stringify({ text: wordA, include_raw_vector: true })
+      });
+      if (!baselineTokenizeRes.ok) throw new Error(`Error en /tokenize para ${wordA}`);
+      const baselineTokenizeData = await baselineTokenizeRes.json();
+
+      let baselineVector: number[] = [];
+      if (baselineTokenizeData.tokens && baselineTokenizeData.tokens.length > 0) {
+        const mainToken = baselineTokenizeData.tokens[0];
+        if (mainToken.vector) {
+          baselineVector = mainToken.vector;
+        }
+      }
+
+      newNodes.push({
+        word: wordA,
+        position: [0, 0, 0], // Explicitly lock anchor to [0,0,0]
+        color: colors.baselineColor,
+        vector: baselineVector,
+        token_id: Math.random()
       });
 
-      if (!arithRes.ok) throw new Error('Error en /arithmetic');
-      const arithData = await arithRes.json();
-
-      let resultWord = 'Resultado';
-      if (Array.isArray(arithData) && arithData.length > 0) {
-        resultWord = arithData[0].word || arithData[0].text;
-        setResults(arithData.map((res: any) => ({
-          ...res,
-          token_id: Number(res.token_id || res.id || 0)
-        })));
-      }
-      else if (arithData.results && arithData.results.length > 0) {
-        resultWord = arithData.results[0].word || arithData.results[0].text;
-        setResults(arithData.results.map((res: any) => ({
-          ...res,
-          token_id: Number(res.token_id || res.id || 0)
-        })));
-      }
-
-      // 2. Extract coordinates and raw 1024D vectors
-      const words = [wordA, wordB, wordC, resultWord];
-      const newNodes: NodeData[] = [];
-      const nodeColors = [colors.wordA, colors.wordB, colors.wordC, colors.result];
-
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        const tokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
+      // 2. Extract Stress Test Query (if provided)
+      if (stressTestQuery.trim() !== '') {
+        const stressRes = await fetch('http://127.0.0.1:8000/tokenize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: word, include_raw_vector: true })
+          body: JSON.stringify({ text: stressTestQuery, include_raw_vector: true })
         });
-        if (!tokenizeRes.ok) throw new Error(`Error en /tokenize para ${word}`);
-        const tokenizeData = await tokenizeRes.json();
-
-        let position: [number, number, number] = [0, 0, 0];
-        let vector: number[] = [];
-
-        if (tokenizeData.tokens && tokenizeData.tokens.length > 0) {
-          const mainToken = tokenizeData.tokens[0];
-          position = extractCoords(mainToken);
-          if (mainToken.vector) {
-            vector = mainToken.vector;
+        if (stressRes.ok) {
+          const stressData = await stressRes.json();
+          if (stressData.tokens && stressData.tokens.length > 0) {
+            const stressToken = stressData.tokens[0];
+            const pos = extractCoords(stressToken); // Radial mapping is determined during render based on Dn
+            const vec = stressToken.vector || [];
+            newNodes.push({
+              word: stressTestQuery,
+              position: pos,
+              color: '#ff3300', // Warning Orange/Red default
+              vector: vec,
+              token_id: Math.random()
+            });
           }
         }
-
-        // If vector array wasn't attached for some reason, use the result_vector from arithmetic if it's the result
-        if (vector.length === 0 && i === 3 && arithData.vector) {
-          vector = arithData.vector;
-        }
-
-        newNodes.push({
-          word,
-          position,
-          color: nodeColors[i],
-          vector,
-          token_id: Math.random() // Unique ID as fallback, ideally token_id from backend
-        });
       }
 
       setNodes(newNodes);
+
+      // --- AUTO-FIT CAMERA LOGIC ---
+      let maxDn = 0;
+
+      if (newNodes.length > 1 && newNodes[1].vector && baselineVector.length > 0) {
+        const vA = baselineVector;
+        const magA = getVectorMagnitude(vA);
+        const magN = getVectorMagnitude(newNodes[1].vector!);
+        if (magA > 0 && magN > 0) {
+          const diffSquaredSum = vA.reduce((sum, val, idx) => {
+            const diff = val - (newNodes[1].vector![idx] || 0);
+            return sum + (diff * diff);
+          }, 0);
+          maxDn = Math.sqrt(diffSquaredSum);
+
+          const angle = Math.atan2(newNodes[1].vector![2], newNodes[1].vector![0]);
+          const normX = Math.cos(angle);
+          const normZ = Math.sin(angle);
+          const BASE_SPREAD = 50.0;
+
+          // Update stress node visual position
+          newNodes[1].position = [
+            normX * maxDn * uiScaleFactor * BASE_SPREAD,
+            0,
+            normZ * maxDn * uiScaleFactor * BASE_SPREAD
+          ];
+        }
+      }
+
+      setNodes([...newNodes]); // Force update with new positions
+
+      // Calculate max bounding radius for deterministic cenital framing
+      const ringRadius = firewallThreshold * 1.5 * uiScaleFactor * 50.0;
+      const maxNodeRadius = maxDn * uiScaleFactor * 50.0;
+      const maxRadius = Math.max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor); // add small padding
+
+      setCameraMaxRadius(maxRadius);
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Error desconocido');
@@ -394,11 +645,151 @@ const ArithmeticHUD: React.FC = () => {
     return Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
   };
 
+  const selectedDnRaw = React.useMemo(() => {
+    if (!selectedThread || !selectedThread.vector || nodes.length < 1 || !nodes[0].vector) return null;
+    const vA = nodes[0].vector;
+    const n = selectedThread.vector;
+    const diffSquaredSum = vA.reduce((sum, val, idx) => {
+      const diff = val - (n[idx] || 0);
+      return sum + (diff * diff);
+    }, 0);
+    return Math.sqrt(diffSquaredSum);
+  }, [selectedThread, nodes]);
+
+  // Firewall Status Check
+  const firewallStatus = React.useMemo(() => {
+    if (nodes.length < 2 || !nodes[0].vector || !nodes[1].vector) return null;
+    const vRes = nodes[0].vector; // Master Baseline Result (index 0)
+    const vTest = nodes[1].vector; // Stress Test Query (index 1)
+
+    const diffSquaredSum = vRes.reduce((sum, val, idx) => {
+      const diff = val - (vTest[idx] || 0);
+      return sum + (diff * diff);
+    }, 0);
+    const dn = Math.sqrt(diffSquaredSum);
+
+    return {
+      distance: dn,
+      isBlocked: dn >= firewallThreshold
+    };
+  }, [nodes, firewallThreshold]);
+
   return (
     <>
       <TelemetryHUD nodesCount={nodes.length > 0 ? nodes.length * 1024 : 0} xStretch={xStretch} />
       <CrosshairHUD />
       <TargetingHUD />
+
+      {/* L2 Analysis Panel */}
+      {selectedThread && selectedDnRaw !== null && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          right: '20px',
+          zIndex: 10,
+          background: 'rgba(0, 0, 0, 0.95)',
+          border: '1px solid #ff00ff',
+          padding: '15px 20px',
+          borderRadius: '8px',
+          color: '#ff00ff',
+          fontFamily: 'monospace',
+          minWidth: '300px',
+          boxShadow: '0 0 20px rgba(255, 0, 255, 0.3)',
+        }}>
+          <h3 style={{ margin: '0 0 15px 0', borderBottom: '1px solid #ff00ff', paddingBottom: '5px', textTransform: 'uppercase' }}>
+            L2 Inspection: {selectedThread.word}
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fff' }}>
+              <span>Raw L2 Distance ($D_n$):</span>
+              <span style={{ color: '#00ffff', fontWeight: 'bold' }}>{selectedDnRaw.toFixed(5)}</span>
+            </div>
+            <div style={{ padding: '8px', background: 'rgba(0,0,0,0.5)', borderRadius: '4px', fontSize: '0.8rem', color: '#aaa', border: '1px solid #333' }}>
+              <div>Live Formula:</div>
+              <div style={{ color: '#fff', fontStyle: 'italic', marginTop: '4px' }}>sqrt(sum((A_i - B_i)^2))</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fff', marginTop: '5px' }}>
+              <span>Derived Similarity Config:</span>
+              <span style={{ color: '#00ff00', fontWeight: 'bold' }}>{((1 / (1 + selectedDnRaw)) * 100).toFixed(2)}%</span>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '5px', textAlign: 'right', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
+              Confidence Formula: 1 / (1 + D_n)
+            </div>
+
+            {/* Noise Delta Map */}
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ color: '#ffea00', fontSize: '0.85rem', marginBottom: '5px', textTransform: 'uppercase', fontWeight: 'bold' }}>Noise Vectors (Delta &gt; 0.2)</div>
+              {nodes.length > 0 && nodes[0].vector && selectedThread.vector ? (
+                (() => {
+                  const vA = nodes[0].vector;
+                  const vN = selectedThread.vector;
+                  const diffs = vA.map((val: number, idx: number) => ({ index: idx, delta: Math.abs(val - (vN[idx] || 0)) }))
+                    .filter((d: { delta: number }) => d.delta > 0.2)
+                    .sort((a: { delta: number }, b: { delta: number }) => b.delta - a.delta)
+                    .slice(0, 5);
+
+                  if (diffs.length === 0) return <div style={{ fontSize: '0.8rem', color: '#00ff00' }}>No significant noise detected.</div>;
+
+                  return diffs.map((d: { index: number, delta: number }, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '3px' }}>
+                      <span style={{ color: '#aaa' }}>DIM-{d.index}</span>
+                      <span style={{ color: '#ff3300' }}>+{d.delta.toFixed(4)}</span>
+                    </div>
+                  ));
+                })()
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Injector Modal */}
+      {showInjector && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 50,
+          background: 'rgba(0, 10, 10, 0.95)',
+          border: '1px solid #00ffff',
+          padding: '20px',
+          borderRadius: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          minWidth: '400px',
+          boxShadow: '0 0 30px rgba(0, 255, 255, 0.5)'
+        }}>
+          <h3 style={{ margin: 0, color: '#00ffff', textTransform: 'uppercase', borderBottom: '1px solid #00ffff', paddingBottom: '5px' }}>Inject Knowledge Context</h3>
+          <p style={{ margin: 0, color: '#aaa', fontSize: '0.8rem' }}>Format: term : definition (one per line)</p>
+          <textarea
+            value={injectorText}
+            onFocus={() => setIsTyping(true)}
+            onBlur={() => setIsTyping(false)}
+            onChange={(e) => setInjectorText(e.target.value)}
+            placeholder="Term : A comprehensive description."
+            style={{ width: '100%', height: '150px', background: '#000', color: '#fff', border: '1px solid #005555', padding: '10px', fontFamily: 'monospace', borderRadius: '4px', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: injectorStatus.includes('Error') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setShowInjector(false)}
+                style={{ background: 'transparent', border: '1px solid #555', color: '#aaa', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleInject}
+                style={{ background: '#003333', border: '1px solid #00ffff', color: '#00ffff', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Inject Pack
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Absolute HUD */}
       <div
@@ -422,53 +813,75 @@ const ArithmeticHUD: React.FC = () => {
           minWidth: '250px'
         }}>
         <h2 style={{ margin: 0, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '2px', textAlign: 'center' }}>
-          Vector Math
+          THE AUDITOR'S CONSOLE
         </h2>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordA }}>Palabra A (+)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordA}
-              onChange={(e) => setWordA(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordA}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordA} onChange={(e) => setColorA(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+        {/* --- ZONE ALPHA: MASTER BASELINE --- */}
+        <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
+          <div style={{ color: '#00ccff', fontSize: '0.9rem', marginBottom: '10px', fontWeight: 'bold' }}>ZONE ALPHA: MASTER BASELINE</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.8rem', color: colors.baselineColor }}>Baseline Input</label>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input
+                value={wordA}
+                onFocus={() => setIsTyping(true)}
+                onBlur={() => setIsTyping(false)}
+                onChange={(e) => setWordA(e.target.value)}
+                style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.baselineColor}`, color: '#fff', borderRadius: '4px' }}
+              />
+              <input type="color" value={colors.baselineColor} onChange={(e) => setBaselineColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordB }}>Palabra B (-)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordB}
-              onChange={(e) => setWordB(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordB}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordB} onChange={(e) => setColorB(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
+        {/* --- ZONE BETA: STRESS TEST SANDBOX --- */}
+        <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
+          <div style={{ color: '#ffcc00', fontSize: '0.9rem', marginBottom: '10px', fontWeight: 'bold' }}>ZONE BETA: STRESS TEST SANDBOX</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.8rem', color: '#ff3300' }}>STRESS_TEST_QUERY</label>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input
+                value={stressTestQuery}
+                onFocus={() => { setIsStressInputFocused(true); setIsTyping(true); }}
+                onBlur={() => { setIsStressInputFocused(false); setIsTyping(false); }}
+                onChange={(e) => setStressTestQuery(e.target.value)}
+                placeholder="Enter query to stress test against BASELINE"
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  background: '#000',
+                  border: `1px solid #ff3300`,
+                  color: '#fff',
+                  borderRadius: '4px',
+                  boxShadow: isStressInputFocused ? '0 0 15px #ff3300' : 'none',
+                  outline: 'none',
+                  transition: 'box-shadow 0.2s ease-in-out'
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.wordC }}>Palabra C (+)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <input
-              value={wordC}
-              onChange={(e) => setWordC(e.target.value)}
-              style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.wordC}`, color: '#fff', borderRadius: '4px' }}
-            />
-            <input type="color" value={colors.wordC} onChange={(e) => setColorC(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '0.8rem', color: colors.result }}>Resultado (=)</label>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <span style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.result}`, color: '#aaa', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {nodes.length === 4 ? nodes[3].word : '???'}
-            </span>
-            <input type="color" value={colors.result} onChange={(e) => setResultColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
-          </div>
+        {/* --- FIREWALL STATUS HUD --- */}
+        <div style={{ padding: '10px', background: firewallStatus ? (firewallStatus.isBlocked ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)') : 'rgba(0,0,0,0.5)', border: `1px solid ${firewallStatus ? (firewallStatus.isBlocked ? '#ff0000' : '#00ff00') : '#555'}`, borderRadius: '4px' }}>
+          <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '5px', textTransform: 'uppercase' }}>Firewall Status</div>
+          {firewallStatus ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: firewallStatus.isBlocked ? '#ff3333' : '#00ff00' }}>
+                STATE: {firewallStatus.isBlocked ? 'BLOCKED' : 'SAFE'}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#fff' }}>
+                <span>L2 Distance ($D_n$):</span>
+                <span>{firewallStatus.distance.toFixed(4)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#fff' }}>
+                <span>Tolerance (Threshold):</span>
+                <span>{firewallThreshold.toFixed(1)}</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#666', fontSize: '0.8rem' }}>AWAITING TEST VECTOR...</div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '5px' }}>
@@ -497,6 +910,20 @@ const ArithmeticHUD: React.FC = () => {
             step="0.1"
             value={xStretch}
             onChange={(e) => setXStretch(parseFloat(e.target.value))}
+            style={{ width: '100%', cursor: 'pointer' }}
+          />
+
+          <label style={{ fontSize: '0.8rem', color: '#ffcc00', display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}>
+            <span>Firewall Tolerance</span>
+            <span>{firewallThreshold.toFixed(1)}</span>
+          </label>
+          <input
+            type="range"
+            min="5.0"
+            max="100.0"
+            step="0.5"
+            value={firewallThreshold}
+            onChange={(e) => setFirewallThreshold(parseFloat(e.target.value))}
             style={{ width: '100%', cursor: 'pointer' }}
           />
 
@@ -545,7 +972,26 @@ const ArithmeticHUD: React.FC = () => {
             transition: 'all 0.3s'
           }}
         >
-          {loading ? 'Calculando...' : 'Calcular'}
+          {loading ? 'CALCULATING...' : 'EXECUTE AUDIT'}
+        </button>
+
+        <button
+          onClick={() => setShowInjector(true)}
+          style={{
+            padding: '8px',
+            background: 'rgba(0,0,0,0.5)',
+            color: '#ff00ff',
+            border: '1px dashed #ff00ff',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '5px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s',
+            fontSize: '0.8rem'
+          }}
+        >
+          [+] INJECT CONTEXT
         </button>
 
         {topResults.length > 0 && (
@@ -567,8 +1013,25 @@ const ArithmeticHUD: React.FC = () => {
       <Canvas camera={{ position: [0, 0, 15], fov: 50, near: 1, far: 200000 }}>
         <ambientLight intensity={0.5} />
         <ProbeSystem nodes={nodes} xStretch={xStretch} uiScaleFactor={uiScaleFactor} />
+        <CameraAutoFit maxRadius={cameraMaxRadius} onComplete={() => setCameraMaxRadius(null)} />
         <pointLight position={[10, 10, 10]} intensity={1} />
         <FlightControls />
+
+        {/* Threshold Boundary Rings */}
+        <group rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]}>
+          {/* Inner safe ring */}
+          <Ring args={[(firewallThreshold * 0.5 * uiScaleFactor * 50.0) - 0.5, firewallThreshold * 0.5 * uiScaleFactor * 50.0, 64]}>
+            <meshBasicMaterial color="#005500" transparent opacity={0.3} side={THREE.DoubleSide} />
+          </Ring>
+          {/* The exact firewall threshold ring */}
+          <Ring args={[(firewallThreshold * uiScaleFactor * 50.0) - 1.0, firewallThreshold * uiScaleFactor * 50.0, 128]}>
+            <meshBasicMaterial color="#ff0000" transparent opacity={0.8} side={THREE.DoubleSide} />
+          </Ring>
+          {/* Outer warning ring */}
+          <Ring args={[(firewallThreshold * 1.5 * uiScaleFactor * 50.0) - 0.5, firewallThreshold * 1.5 * uiScaleFactor * 50.0, 128]}>
+            <meshBasicMaterial color="#ff3300" transparent opacity={0.2} side={THREE.DoubleSide} />
+          </Ring>
+        </group>
 
         {/* Render nodes and text */}
         {nodes.map((node, i) => {
@@ -578,10 +1041,13 @@ const ArithmeticHUD: React.FC = () => {
             const vA = nodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
-            let dn = 1;
+            let dn = 0;
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (node.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             if (node.vector.length >= 3) {
               // 2D Directional Mapping: XZ Layout (Semantic Disk)
@@ -627,10 +1093,13 @@ const ArithmeticHUD: React.FC = () => {
             const vA = nodes[0]?.vector || [];
             const magA = getVectorMagnitude(vA);
             const magN = getVectorMagnitude(node.vector);
-            let dn = 1;
+            let dn = 0;
             if (magA > 0 && magN > 0) {
-              const dot = vA.reduce((sum, val, idx) => sum + val * (node.vector![idx] || 0), 0);
-              dn = 1 - (dot / (magA * magN));
+              const diffSquaredSum = vA.reduce((sum, val, idx) => {
+                const diff = val - (node.vector![idx] || 0);
+                return sum + (diff * diff);
+              }, 0);
+              dn = Math.sqrt(diffSquaredSum);
             }
             if (node.vector.length >= 3) {
               // 2D Directional Mapping: XZ Layout (Semantic Disk)
@@ -647,11 +1116,19 @@ const ArithmeticHUD: React.FC = () => {
             }
           }
 
+          // Render Firewall Thread Logic
+          let threadIsBlocked = false;
+          let labelText = `${node.word} [${i === 0 ? "BASELINE" : "STRESS"}]`;
+
+          if (i === 1 && firewallStatus) { // Stress test node is at index 1
+            threadIsBlocked = firewallStatus.isBlocked;
+          }
+
           return (
             <group key={`ribbon-${node.token_id || i}`} position={pos}>
               <Billboard position={[-(512 * xStretch) - 20, 0, 0]}>
                 <Text
-                  color={node.color}
+                  color={threadIsBlocked ? '#ff3300' : node.color}
                   fontSize={12}
                   anchorX="center"
                   anchorY="middle"
@@ -659,10 +1136,10 @@ const ArithmeticHUD: React.FC = () => {
                   outlineColor="#000000"
                   fontStyle="italic"
                 >
-                  {node.word} [{i === 0 ? "A" : i === 1 ? "B" : i === 2 ? "C" : "RES"}]
+                  {labelText}
                 </Text>
               </Billboard>
-              <SemanticThread data={node.vector} xStretch={xStretch} position={[0, 0, 0]} amplitude={amplitude} baseColor={node.color} />
+              <SemanticThread data={node.vector} xStretch={xStretch} position={[0, 0, 0]} amplitude={amplitude} baseColor={node.color} isBlocked={threadIsBlocked} />
             </group>
           )
         })}
@@ -670,6 +1147,9 @@ const ArithmeticHUD: React.FC = () => {
         {/* Grid helper for scale reference */}
         <gridHelper args={[20, 20, '#222222', '#111111']} position={[0, -5, 0]} />
       </Canvas>
+
+      {/* Radar Map Overlay - Relocated to standard HTML DOM overlay */}
+      <RadarHUD maxRadius={cameraMaxRadius} nodes={nodes} />
     </>
   );
 };

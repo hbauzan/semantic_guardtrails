@@ -6,26 +6,30 @@ interface SemanticState {
     amplitude: number;
     boostFactor: number;
     colors: {
-        wordA: string;
-        wordB: string;
-        wordC: string;
-        result: string;
+        baselineColor: string;
     };
     results: Array<{ word: string; score: number; token_id: number }>;
     hoveredDimensionIndex: number | null;
     selectedValues: number[];
+    hoveredNode: any | null;
+    selectedThread: any | null;
+    stressTestQuery: string;
+    firewallThreshold: number;
+    isTyping: boolean;
 
     setUiScaleFactor: (scale: number) => void;
     setXStretch: (stretch: number) => void;
     setAmplitude: (amp: number) => void;
     setBoostFactor: (factor: number) => void;
-    setColorA: (color: string) => void;
-    setColorB: (color: string) => void;
-    setColorC: (color: string) => void;
-    setResultColor: (color: string) => void;
+    setBaselineColor: (color: string) => void;
     setResults: (results: Array<{ word: string; score: number; token_id: number }>) => void;
     setHoveredDimensionIndex: (idx: number | null) => void;
     setSelectedValues: (vals: number[]) => void;
+    setHoveredNode: (node: any | null) => void;
+    setSelectedThread: (thread: any | null) => void;
+    setStressTestQuery: (query: string) => void;
+    setFirewallThreshold: (threshold: number) => void;
+    setIsTyping: (typing: boolean) => void;
 }
 
 export const useSemanticStore = create<SemanticState>((set) => ({
@@ -34,24 +38,28 @@ export const useSemanticStore = create<SemanticState>((set) => ({
     amplitude: 25.0,
     boostFactor: 10.0,
     colors: {
-        wordA: '#00ffff',
-        wordB: '#ff00ff',
-        wordC: '#00ff00',
-        result: '#ffff00',
+        baselineColor: '#00ffff',
     },
     results: [],
     hoveredDimensionIndex: null,
     selectedValues: [],
+    hoveredNode: null,
+    selectedThread: null,
+    stressTestQuery: '',
+    firewallThreshold: 25.0,
+    isTyping: false,
 
     setUiScaleFactor: (scale) => set({ uiScaleFactor: scale }),
     setXStretch: (stretch) => set({ xStretch: stretch }),
     setAmplitude: (amp) => set({ amplitude: amp }),
     setBoostFactor: (factor) => set({ boostFactor: factor }),
-    setColorA: (color) => set((state) => ({ colors: { ...state.colors, wordA: color } })),
-    setColorB: (color) => set((state) => ({ colors: { ...state.colors, wordB: color } })),
-    setColorC: (color) => set((state) => ({ colors: { ...state.colors, wordC: color } })),
-    setResultColor: (color) => set((state) => ({ colors: { ...state.colors, result: color } })),
+    setBaselineColor: (color) => set((state) => ({ colors: { ...state.colors, baselineColor: color } })),
     setResults: (results) => set({ results }),
     setHoveredDimensionIndex: (idx) => set({ hoveredDimensionIndex: idx }),
     setSelectedValues: (vals) => set({ selectedValues: vals }),
+    setHoveredNode: (node) => set({ hoveredNode: node }),
+    setSelectedThread: (thread) => set({ selectedThread: thread }),
+    setStressTestQuery: (query) => set({ stressTestQuery: query }),
+    setFirewallThreshold: (val) => set({ firewallThreshold: val }),
+    setIsTyping: (typing) => set({ isTyping: typing }),
 }));

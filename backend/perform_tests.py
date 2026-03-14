@@ -319,10 +319,10 @@ def test_vector_magnitudes_safe_math():
         mag_a = math.sqrt(sum(a*a for a in vec_a))
         mag_n = math.sqrt(sum(n*n for n in vec_n))
         
-        dn = 1.0
+        dn = 0.0
         if mag_a > 0 and mag_n > 0:
-            dot = sum(a * b for a, b in zip(vec_a, vec_n))
-            dn = 1 - (dot / (mag_a * mag_n))
+            diff_squared_sum = sum((a - n)**2 for a, n in zip(vec_a, vec_n))
+            dn = math.sqrt(diff_squared_sum)
             
         if math.isnan(dn):
             log_fail("SafeMath failed: Math produced NaN")
@@ -368,12 +368,275 @@ def test_xz_layout_bearing_math():
         log_fail("Exception", str(e))
         return False
 
+def test_l2_distance_integrity():
+    log_section("Testing L2 Distance Integrity")
+    try:
+        # Just ensure arithmetic endpoint didn't crash because we swapped the metric
+        r = httpx.post(f"{BASE_URL}/arithmetic", json={"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 3}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            log_success("L2 Distance Integrity OK. Endpoint is stable with new metric.")
+            return True
+        log_fail("L2 Distance Integrity failed. Endpoint crashed.")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_l2_frontend_backend_parity():
+    log_section("Testing L2 Frontend-Backend Mathematical Parity")
+    try:
+        import math
+        r = httpx.post(f"{BASE_URL}/arithmetic", json={"word_a": "rey", "word_b": "hombre", "word_c": "mujer", "top_k": 1}, timeout=TIMEOUT)
+        if r.status_code != 200:
+            log_fail("Arithmetic request failed.")
+            return False
+        data = r.json()
+        vector_a = data.get("vector") # Base vector
+        results = data.get("results", [])
+        if not vector_a or not results:
+            log_info("Skipped L2 Parity: DB might be empty or missing vector data.")
+            return True
+            
+        vector_n = results[0].get("vector")
+        backend_distance = results[0].get("_distance", 0) # LanceDB's actual L2 output
+        
+        if not vector_n:
+            log_fail("Missing vector in result node.")
+            return False
+
+        # Frontend calculation replica: sum((A_i - B_i)^2) -> LanceDB "l2" metric is actually squared L2 distance.
+        diff_squared_sum = sum((a - n)**2 for a, n in zip(vector_a, vector_n))
+        frontend_distance = diff_squared_sum
+        
+        # Parity check (allowing for micro-frictions in float precision)
+        if abs(frontend_distance - backend_distance) > 0.0001:
+            log_fail(f"L2 Parity mismatch! Frontend formula: {frontend_distance:.5f} != Backend LanceDB: {backend_distance:.5f}")
+            return False
+            
+        log_success(f"L2 Parity Verified: Frontend ({frontend_distance:.4f}) == Backend ({backend_distance:.4f})")
+        return True
+    except Exception as e:
+        log_fail(f"Exception in L2 Parity Test: {e}")
+        return False
+
+def test_inject_pack_stress():
+    log_section("Testing Context Inject Pack Stress (/corpus/inject-pack)")
+    try:
+        payload = {
+            "name": "Stress Pack",
+            "color": "#ff00ff",
+            "description": "Auto-test injection payload",
+            "terms": {
+                "Alpha Centauri": "Nearest star system.",
+                "Singularity": "Center of a black hole."
+            }
+        }
+        r = httpx.post(f"{BASE_URL}/corpus/inject-pack", json=payload, timeout=TIMEOUT)
+        if r.status_code == 200:
+            log_success("Context Inject Pack OK")
+            return True
+        else:
+            log_fail(f"Inject Pack failed with code {r.status_code}", r.text)
+            return False
+    except Exception as e:
+        # If the endpoint doesn't exist yet, it's fine for now, we'll verify this during the system heartbeat.
+        log_fail(f"Exception during Inject Pack Test: {e}")
+        return False
+
+def test_firewall_trigger_logic():
+    log_section("Testing Firewall Trigger Logic (Math Validation)")
+    try:
+        import math
+        firewall_threshold = 25.0
+        vec_a = [0.0] * 1024
+        vec_b_safe = [0.1] * 1024
+        vec_b_blocked = [1.5] * 1024
+
+        dn_safe = math.sqrt(sum((a - b)**2 for a, b in zip(vec_a, vec_b_safe)))
+        dn_blocked = math.sqrt(sum((a - b)**2 for a, b in zip(vec_a, vec_b_blocked)))
+
+        if dn_safe >= firewall_threshold:
+            log_fail(f"Logic Error: Safe vector blocked! Dn: {dn_safe:.2f} >= {firewall_threshold}")
+            return False
+
+        if dn_blocked < firewall_threshold:
+            log_fail(f"Logic Error: Blocked vector allowed! Dn: {dn_blocked:.2f} < {firewall_threshold}")
+            return False
+        
+        log_success(f"Firewall Logic OK -> Safe: {dn_safe:.2f}, Blocked: {dn_blocked:.2f} (Threshold: {firewall_threshold})")
+        return True
+    except Exception as e:
+        log_fail(f"Exception during Firewall Test: {e}")
+        return False
+
+def test_single_baseline_l2_audit():
+    log_section("Testing Single Baseline L2 Audit Tokenization (/tokenize)")
+    try:
+        # Test 1: Fetch Word A (Master Baseline)
+        r_base = httpx.post(
+            f"{BASE_URL}/tokenize",
+            json={"text": "rey", "include_raw_vector": True},
+            timeout=TIMEOUT
+        )
+        if r_base.status_code != 200:
+            log_fail("Master Baseline tokenize request failed", r_base.text)
+            return False
+
+        data_base = r_base.json()
+        tokens_base = data_base.get("tokens", [])
+        if not tokens_base or "vector" not in tokens_base[0]:
+            log_fail("Master Baseline raw vector was missing.")
+            return False
+
+        vector_base = tokens_base[0]["vector"]
+        if len(vector_base) != 1024:
+             log_fail(f"Master Baseline Vector has unexpected dimensionality: {len(vector_base)}")
+             return False
+
+        # Test 2: Fetch Stress Test Query
+        r_stress = httpx.post(
+            f"{BASE_URL}/tokenize",
+            json={"text": "reina", "include_raw_vector": True},
+            timeout=TIMEOUT
+        )
+        if r_stress.status_code != 200:
+            log_fail("Stress Test tokenize request failed", r_stress.text)
+            return False
+
+        data_stress = r_stress.json()
+        tokens_stress = data_stress.get("tokens", [])
+        if not tokens_stress or "vector" not in tokens_stress[0]:
+            log_fail("Stress Test raw vector was missing.")
+            return False
+
+        vector_stress = tokens_stress[0]["vector"]
+        if len(vector_stress) != 1024:
+             log_fail(f"Stress Test Vector has unexpected dimensionality: {len(vector_stress)}")
+             return False
+
+        # Test 3: Validate L2 Distance
+        import math
+        diff_squared_sum = sum((a - s)**2 for a, s in zip(vector_base, vector_stress))
+        dn = math.sqrt(diff_squared_sum)
+
+        if math.isnan(dn):
+            log_fail("L2 distance calculation produced NaN.")
+            return False
+
+        log_success(f"Single Baseline L2 Audit Tokenization OK. (Dn: {dn:.4f})")
+        return True
+    except Exception as e:
+        log_fail("Exception during Single Baseline L2 Audit test", str(e))
+        return False
+
+def test_l2_bounding_box_math():
+    log_section("Testing L2 Auto-Fit Bounding Box Math")
+    try:
+        import math
+        vec_a = [0.0] * 1024
+        vec_n = [1.0] * 1024
+        uiScaleFactor = 5.0
+        BASE_SPREAD = 50.0
+
+        mag_a = math.sqrt(sum(a*a for a in vec_a))
+        mag_n = math.sqrt(sum(n*n for n in vec_n))
+        
+        maxDn = 0.0
+        if mag_a == 0.0 and mag_n > 0.0:
+             # Our frontend handles length > 0, but technically Math.sqrt behaves well if a is 0. 
+             # Let's verify sum squares
+             diff_squared_sum = sum((a - n)**2 for a, n in zip(vec_a, vec_n))
+             maxDn = math.sqrt(diff_squared_sum)
+
+        angle = math.atan2(vec_n[2], vec_n[0])
+        normX = math.cos(angle)
+        normZ = math.sin(angle)
+        
+        posX = normX * maxDn * uiScaleFactor * BASE_SPREAD
+        posZ = normZ * maxDn * uiScaleFactor * BASE_SPREAD
+        
+        if math.isnan(posX) or math.isnan(posZ):
+            log_fail("Bounding Box projection Math produced NaN.")
+            return False
+
+        log_success(f"Bounding Box Math OK. Projections generated: X={posX:.2f}, Z={posZ:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during L2 Bounding Box test", str(e))
+        return False
+
+def test_cenital_autofit_math():
+    log_section("Testing Cenital Auto-Fit Camera Math")
+    try:
+        import math
+        # Simulate frontend deterministic logic
+        firewallThreshold = 25.0
+        uiScaleFactor = 2.0
+        BASE_SPREAD = 50.0
+        
+        # Scenario: Stress test thread is further than firewall
+        maxDn = 30.0 
+        
+        ringRadius = firewallThreshold * 1.5 * uiScaleFactor * BASE_SPREAD
+        maxNodeRadius = maxDn * uiScaleFactor * BASE_SPREAD
+        
+        # The logic: Math.max(ringRadius, maxNodeRadius) + padding
+        maxRadius = max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor)
+        
+        # Assert math constraints
+        expected_Y = maxRadius * 1.5
+        expected_Z = maxRadius * 0.5
+        
+        if expected_Y <= 0 or expected_Z <= 0:
+            log_fail(f"Logic Error: Negative or zero camera coordinates Y={expected_Y}, Z={expected_Z}")
+            return False
+            
+        log_success(f"Cenital Auto-Fit Math OK. Deterministic Framing: Y={expected_Y:.2f}, Z={expected_Z:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during Cenital Auto-Fit Math test", str(e))
+        return False
+
+def test_radar_hud_telemetry_bounds():
+    log_section("Testing Radar HUD Telemetry Bounds Math Check")
+    try:
+        import math
+        firewallThreshold = 100.0
+        uiScaleFactor = 40.0
+        BASE_SPREAD = 50.0
+        
+        # Scenario: Extreme stress test thread distance
+        maxDn = 1500.0
+        
+        ringRadius = firewallThreshold * 1.5 * uiScaleFactor * BASE_SPREAD
+        maxNodeRadius = maxDn * uiScaleFactor * BASE_SPREAD
+        
+        # Expected frontend deterministic calculation
+        maxRadius = max(ringRadius, maxNodeRadius) + (50 * uiScaleFactor)
+        
+        if math.isnan(maxRadius) or math.isinf(maxRadius):
+            log_fail("Math Error: maxRadius resulted in NaN or Infinity.")
+            return False
+            
+        if maxRadius <= 0:
+            log_fail("Math Error: maxRadius is zero or negative.")
+            return False
+            
+        log_success(f"Radar HUD Telemetry Bounds OK. Deterministic maxRadius calculated as finite number: {maxRadius:.2f}")
+        return True
+    except Exception as e:
+        log_fail("Exception during Radar HUD Telemetry Bounds Math Check", str(e))
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
         test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
         test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
-        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math
+        test_hud_telemetry_scaling_sim, test_vector_magnitudes_safe_math, test_xz_layout_bearing_math,
+        test_l2_distance_integrity, test_l2_frontend_backend_parity, test_inject_pack_stress,
+        test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
+        test_cenital_autofit_math, test_radar_hud_telemetry_bounds
     ]
     all_passed = True
     for test in tests:

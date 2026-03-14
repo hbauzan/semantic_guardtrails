@@ -8,6 +8,7 @@ interface SemanticThreadProps {
   xStretch?: number;
   amplitude?: number;
   baseColor?: string;
+  isBlocked?: boolean;
 }
 
 export const SemanticThread: React.FC<SemanticThreadProps> = ({
@@ -15,7 +16,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   position = [0, 0, 0],
   xStretch = 1.0,
   amplitude = 100.0,
-  baseColor = '#ffffff'
+  baseColor = '#ffffff',
+  isBlocked = false
 }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = 1024;
@@ -27,7 +29,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
   const shaderMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
       uniforms: {
-        uBaseColor: { value: parsedBaseColor }
+        uBaseColor: { value: parsedBaseColor },
+        uIsBlocked: { value: isBlocked ? 1.0 : 0.0 }
       },
       vertexShader: `
         attribute float instanceValue;
@@ -43,6 +46,7 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
       `,
       fragmentShader: `
         uniform vec3 uBaseColor;
+        uniform float uIsBlocked;
         varying float vValue;
 
         void main() {
@@ -50,9 +54,9 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
           float alpha = 1.0;
 
           if (vValue >= 0.5) {
-            finalColor = uBaseColor;
+            finalColor = uIsBlocked > 0.5 ? vec3(1.0, 0.2, 0.0) : uBaseColor;
           } else if (vValue <= -0.5) {
-            finalColor = vec3(0.3, 0.0, 0.8); // Deep Blue/Purple
+            finalColor = uIsBlocked > 0.5 ? vec3(0.8, 0.0, 0.0) : vec3(0.3, 0.0, 0.8); // Deep Blue/Purple or Dark Red
           } else {
             finalColor = vec3(0.2, 0.2, 0.2);
             alpha = 0.05;
@@ -73,7 +77,8 @@ export const SemanticThread: React.FC<SemanticThreadProps> = ({
 
   useEffect(() => {
     shaderMaterial.uniforms.uBaseColor.value = parsedBaseColor;
-  }, [parsedBaseColor, shaderMaterial]);
+    shaderMaterial.uniforms.uIsBlocked.value = isBlocked ? 1.0 : 0.0;
+  }, [parsedBaseColor, isBlocked, shaderMaterial]);
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
