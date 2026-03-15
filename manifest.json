@@ -49,6 +49,7 @@
         "pdf_ingest": true,
         "pdf_upload_ui": true,
         "async_pdf_vectorization": true,
+        "non_blocking_ingestion": true,
         "progress_telemetry_ui": true,
         "batch_embedding_optimization": true,
         "streaming_ingestion": true,

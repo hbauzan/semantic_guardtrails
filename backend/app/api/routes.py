@@ -12,6 +12,12 @@ import tempfile
 import json
 import uuid
 from pathlib import Path
+import asyncio
+
+import fitz
+import gc
+import psutil
+import torch
 
 from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
 from app.modules.embedder import Embedder
@@ -72,66 +78,108 @@ process_metadata: Dict[str, Any] = {}
 
 def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
     try:
+        print(f"🚀 [TASK {task_id}] Iniciando ingesta de {filename}...")
         process_metadata[task_id]["status"] = "processing"
-        import fitz, psutil, gc, time
 
+        print(f"📄 [TASK {task_id}] Abriendo PDF con PyMuPDF...")
         doc = fitz.open(file_path)
         total_pages = doc.page_count
+        print(f"📄 [TASK {task_id}] PDF abierto. Total páginas: {total_pages}")
+        
         process_metadata[task_id]["total_chunks"] = total_pages 
         process_metadata[task_id]["processed_chunks"] = 0
+        process_metadata[task_id]["start_time"] = time.time()
         
-        ingestor = Ingestor(chunk_size=2048, chunk_overlap=200) # Bloques grandes para el M4
-        next_id = 20000
-        batch_size = 128 # Ráfaga de 128 vectores en paralelo
-        batch_chunks = []
+        ingestor = Ingestor(chunk_size=2048, chunk_overlap=200)
         
+        # 1. Fase de Extracción
+        all_chunks = []
         for i, page in enumerate(doc):
             text = page.get_text()
-            if not text: continue
+            if text:
+                all_chunks.extend(list(ingestor._chunk_text(text, source=filename, page=i+1)))
+            process_metadata[task_id]["processed_chunks"] = i + 1
+            print(f"🔍 [TASK {task_id}] Extraída página {i+1}/{total_pages}")
             
-            # Pica la página en trozos
-            page_chunks = list(ingestor._chunk_text(text, source=filename, page=i+1))
-            batch_chunks.extend(page_chunks)
+        doc.close()
+        print(f"🧠 [TASK {task_id}] Extracción completa. Total fragmentos: {len(all_chunks)}. Iniciando Inferencia MPS...")
+        
+        # 2. Fase de Inferencia en GPU
+        batch_size = 32
+        all_db_items = []
+        next_id = 20000
+        
+        for i in range(0, len(all_chunks), batch_size):
+            batch = all_chunks[i:i+batch_size]
+            texts = [c.text for c in batch]
             
-            # Si llenamos el pallet o es la última página, disparamos a la GPU
-            if len(batch_chunks) >= batch_size or i == total_pages - 1:
-                if not batch_chunks: continue
+            vectors = embedder.encode(texts)
+            
+            for idx, c in enumerate(batch):
+                all_db_items.append(DBItem(
+                    id=next_id, text=c.text, vector=vectors[idx].tolist(),
+                    metadata=c.metadata, cluster_label="SOVEREIGN_KNOWLEDGE", cluster_id=-2
+                ))
+                next_id += 1
                 
-                # INFERENCIA MASIVA MPS
-                texts = [c.text for c in batch_chunks]
-                vectors = embedder.encode(texts) # Aquí es donde el MPS vuela
-                
-                db_items = [
-                    DBItem(
-                        id=next_id + idx,
-                        text=c.text,
-                        vector=vectors[idx].tolist(),
-                        metadata=c.metadata,
-                        cluster_label="SOVEREIGN_KNOWLEDGE",
-                        cluster_id=-2
-                    ) for idx, c in enumerate(batch_chunks)
-                ]
-                
-                knowledge_storage.add(db_items)
-                next_id += len(db_items)
-                
-                # Telemetría para el Mono
-                process_metadata[task_id]["processed_chunks"] = i + 1
-                process_metadata[task_id]["ram_usage_mb"] = int(psutil.Process().memory_info().rss / 1024 / 1024)
-                
-                # Limpieza agresiva
-                del db_items, texts, vectors, batch_chunks
-                batch_chunks = []
-                gc.collect()
+            process_metadata[task_id]["ram_usage_mb"] = int(psutil.Process().memory_info().rss / 1024 / 1024)
+            print(f"⚡ [TASK {task_id}] Batch procesado ({min(i+batch_size, len(all_chunks))}/{len(all_chunks)})")
+            gc.collect()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+
+        # 3. Fase de I/O
+        if all_db_items:
+            print(f"💾 [TASK {task_id}] Guardando {len(all_db_items)} vectores en LanceDB...")
+            knowledge_storage.add(all_db_items)
 
         process_metadata[task_id]["status"] = "completed"
+        print(f"✅ [TASK {task_id}] Ingesta Finalizada con éxito.")
     except Exception as e:
         process_metadata[task_id]["status"] = "error"
-        print(f"FATAL: {e}")
+        print(f"❌ [TASK {task_id}] ERROR FATAL: {e}")
     finally:
-        doc.close()
         if file_path.exists(): file_path.unlink()
+        gc.collect()
+
+# --- Modificamos la ruta de Upload para usar asyncio.to_thread ---
+@router.post("/corpus/upload-pdf")
+async def upload_pdf(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+            
+        task_id = str(uuid.uuid4())
         
+        process_metadata[task_id] = {
+            "status": "processing",
+            "total_chunks": 0,
+            "processed_chunks": 0,
+            "ram_usage_mb": 0,
+            "start_time": time.time()
+        }
+        
+        # EL CAMBIO CLAVE: Usamos to_thread para no bloquear FastAPI
+        background_tasks.add_task(
+            asyncio.to_thread,
+            process_pdf_background,
+            task_id,
+            tmp_path,
+            file.filename,
+            embedder,
+            knowledge_storage
+        )
+        
+        return {"status": "success", "task_id": task_id, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Routes ---
 
 def get_directory_size(path: Path) -> float:
@@ -238,41 +286,7 @@ async def chat_endpoint(
             
     return StreamingResponse(chat_generator(), media_type="application/x-ndjson")
 
-@router.post("/corpus/upload-pdf")
-async def upload_pdf(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    embedder: Embedder = Depends(get_embedder),
-    knowledge_storage: Storage = Depends(get_knowledge_storage)
-):
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(await file.read())
-            tmp_path = Path(tmp.name)
-            
-        task_id = str(uuid.uuid4())
-        
-        # Initialize registry state immediately
-        process_metadata[task_id] = {
-            "status": "processing",
-            "total_chunks": 0,
-            "processed_chunks": 0,
-            "ram_usage_mb": 0,
-            "start_time": time.time()
-        }
-        
-        background_tasks.add_task(
-            process_pdf_background,
-            task_id,
-            tmp_path,
-            file.filename,
-            embedder,
-            knowledge_storage
-        )
-        
-        return {"status": "success", "task_id": task_id, "filename": file.filename}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/corpus/task-status/{task_id}")
 async def task_status(task_id: str):

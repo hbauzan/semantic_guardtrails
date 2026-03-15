@@ -78,4 +78,8 @@ class Ingestor:
                     chunk_text = text[start:end]
             
             yield Chunk(text=chunk_text, metadata=metadata)
-            start += (len(chunk_text) - self.chunk_overlap)
+            
+            step = len(chunk_text) - self.chunk_overlap
+            if step <= 0:
+                break
+            start += step

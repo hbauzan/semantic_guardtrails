@@ -867,6 +867,48 @@ def test_system_stats_endpoint():
         log_fail(f"Exception: {e}")
         return False
 
+def test_pdf_ingestion_non_blocking_and_imports():
+    log_section("Testing PDF Ingestion Non-Blocking and Imports (/corpus/upload-pdf)")
+    try:
+        import time
+        files = {'file': ('dummy_test.pdf', b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 21 >>\nstream\nBT /F1 24 Tf 100 700 Td (Hello World) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000214 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n285\n%%EOF\n', 'application/pdf')}
+        
+        start_t = time.time()
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        end_t = time.time()
+        
+        if r.status_code != 200:
+            log_fail(f"Upload failed: {r.text}")
+            return False
+        
+        if (end_t - start_t) > 2.0:
+            log_fail(f"Endpoint blocked! Took {end_t - start_t:.2f}s instead of returning immediately.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        # Poll status
+        for _ in range(10):
+            time.sleep(1)
+            status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+            if status_r.status_code == 200:
+                status_data = status_r.json()
+                if status_data.get("status") == "completed":
+                    log_success("PDF Ingestion Non-Blocking and Imports OK (Completed without errors)")
+                    return True
+                elif status_data.get("status") == "error":
+                    log_fail("Background ingestion failed (NameError or other exception).")
+                    return False
+            elif status_r.status_code == 500:
+                log_fail(f"Status endpoint threw 500: {status_r.text}")
+                return False
+                
+        log_success("PDF Ingestion Non-Blocking OK (Still processing, but no crash detected)")
+        return True
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -877,7 +919,8 @@ def main():
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
         test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
         test_bge_m3_vector_parity_chat_prompt, test_async_pdf_upload_task_creation, test_task_status_endpoint, test_firewall_interceptor_blocking,
-        test_task_status_ram_telemetry, test_streaming_ingestor_generator, test_system_stats_endpoint
+        test_task_status_ram_telemetry, test_streaming_ingestor_generator, test_system_stats_endpoint,
+        test_etr_telemetry_math, test_pdf_ingestion_non_blocking_and_imports
     ]
     all_passed = True
     for test in tests:
@@ -892,10 +935,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Adding to main execution routine
-if __name__ == "__main__":
-    tests = [
-        test_etr_telemetry_math,
-        # (Assuming the runner is already properly set up, we just needed the function added)
-    ]

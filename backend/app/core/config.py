@@ -8,6 +8,34 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 class Settings(BaseSettings):
+    APP_NAME: str = "LSV Engine"
+    API_V1_STR: str = "/api/v1"
+    DEBUG: bool = False
+    FIREWALL_THRESHOLD: float = 0.45
+    LOAD_DEMOS: bool = False
+    
+    # --- MODO CATANGA ---
+    INGEST_BATCH_SIZE: int = 128
+    INGEST_CHUNK_SIZE: int = 2048
+    INGEST_CHUNK_OVERLAP_PCT: float = 0.10
+    
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
+    DATA_DIR: Path = BASE_DIR / "data"
+    LANCEDB_URI: Path = DATA_DIR / "lancedb"
+    CONTEXT_DB_PATH: Path = DATA_DIR / "context.db"
+    VOCAB_PATH: Path = BASE_DIR.parent / "public" / "vocab.txt" 
+    
+    MODEL_NAME: str = "BAAI/bge-m3"
+    DEVICE: str = "mps" # Forzamos la GPU de Apple
+    HF_TOKEN: Optional[str] = None
+    HF_HUB_ETAG_TIMEOUT: int = 30
+    HF_HUB_DOWNLOAD_TIMEOUT: int = 300
+    VECTOR_DIM: int = 1024
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore" # Evita que el server explote
+
     # App Config
     APP_NAME: str = "LSV Engine"
     API_V1_STR: str = "/api/v1"

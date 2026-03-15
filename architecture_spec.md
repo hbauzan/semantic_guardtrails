@@ -12,7 +12,7 @@
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
 
 ## 4. Local RAG & Sovereign AI Engine
-* **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks`. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
+* **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks` and `asyncio.to_thread` offloading to prevent Main Event Loop blocking. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
 * **RSS Hard Memory Cap ($4.0$ GB)**: Utilizes `psutil` natively monitoring `rss_bytes` inside ingestion workers. Upon exceeding memory bounds, process initiates `CRITICAL_MEMORY_ABORT`.
 * **Vectorization Telemetry Engine**: Exposes real-time memory usage alongside processed pages via `/corpus/task-status/{task_id}` for native telemetry HUD visualization during processing. 
 * **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.

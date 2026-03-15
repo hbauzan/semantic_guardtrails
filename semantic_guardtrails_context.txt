@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 20:50:49.708761
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 23:11:00.788784
 
 
 ################################################################################
@@ -19,7 +19,7 @@ FILE: architecture_spec.md
 * **Context Packager:** `semantic_guardtrails_packager.py` (Triggered via `run_pack.sh`). Generates unified context bundles for LLM ingestion, enforcing `sg_env` validation and state checks.
 
 ## 4. Local RAG & Sovereign AI Engine
-* **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks`. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
+* **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks` and `asyncio.to_thread` offloading to prevent Main Event Loop blocking. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
 * **RSS Hard Memory Cap ($4.0$ GB)**: Utilizes `psutil` natively monitoring `rss_bytes` inside ingestion workers. Upon exceeding memory bounds, process initiates `CRITICAL_MEMORY_ABORT`.
 * **Vectorization Telemetry Engine**: Exposes real-time memory usage alongside processed pages via `/corpus/task-status/{task_id}` for native telemetry HUD visualization during processing. 
 * **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.
@@ -125,6 +125,7 @@ FILE: manifest.json
         "pdf_ingest": true,
         "pdf_upload_ui": true,
         "async_pdf_vectorization": true,
+        "non_blocking_ingestion": true,
         "progress_telemetry_ui": true,
         "batch_embedding_optimization": true,
         "streaming_ingestion": true,
@@ -225,6 +226,11 @@ import tempfile
 import json
 import uuid
 from pathlib import Path
+import asyncio
+
+import fitz
+import gc
+import psutil
 
 from app.core.dependencies import get_embedder, get_storage, get_knowledge_storage, get_galaxy_cache, get_context_vault, get_identity_resolver, state
 from app.modules.embedder import Embedder
@@ -285,133 +291,105 @@ process_metadata: Dict[str, Any] = {}
 
 def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
     try:
+        print(f"🚀 [TASK {task_id}] Iniciando ingesta de {filename}...")
         process_metadata[task_id]["status"] = "processing"
-        
-        import fitz
-        import psutil
-        import gc
-        
-        try:
-            doc = fitz.open(file_path)
-            total_pages = doc.page_count
-            doc.close()
-        except Exception:
-            total_pages = 1
-            
-        process_metadata[task_id]["total_chunks"] = total_pages
-        process_metadata[task_id]["processed_chunks"] = 0
-        process_metadata[task_id]["ram_usage_mb"] = 0
-        
-        ingestor = Ingestor()
-        chunk_generator = ingestor.load_file(file_path)
-        
-        df = knowledge_storage.get_all_vectors()
-        next_id = 20000
-        if not df.empty and 'id' in df.columns:
-            existing_ids = df['id'].tolist()
-            if existing_ids:
-                next_id = max(existing_ids) + 1
-        
-        batch_size = settings.INGEST_BATCH_SIZE
-        batch_chunks = []
-        batch_count = 0
-        current_page = 0
-        
-        for chunk in chunk_generator:
-            # RSS Hard Cap Monitor
-            process = psutil.Process()
-            rss_bytes = process.memory_info().rss
-            ram_mb = rss_bytes / (1024 * 1024)
-            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
-            
-            if rss_bytes > (4 * 1024 * 1024 * 1024):
-                print(f"[CRITICAL_MEMORY_ABORT] Task {task_id} exceeded 4GB RAM threshold ({ram_mb:.0f} MB). Terminating.")
-                process_metadata[task_id]["status"] = "CRITICAL_MEMORY_ABORT"
-                return
-                
-            batch_chunks.append(chunk)
-            current_page = max(current_page, chunk.metadata.get("page", 1))
-            
-            if len(batch_chunks) >= batch_size:
-                db_items = []
-                
-                # --- VERDADERO BATCHING PARA M4 PRO ---
-                # Pasamos la lista entera de textos al modelo para inferencia paralela
-                texts_to_encode = [b_chunk.text for b_chunk in batch_chunks]
-                batch_vectors = embedder.encode(texts_to_encode)
-                
-                for i, b_chunk in enumerate(batch_chunks):
-                    vector = batch_vectors[i]
-                    item = DBItem(
-                        id=next_id,
-                        text=b_chunk.text,
-                        vector=vector.tolist() if hasattr(vector, 'tolist') else list(vector),
-                        metadata={"source": filename, **b_chunk.metadata},
-                        cluster_label="SOVEREIGN_KNOWLEDGE",
-                        cluster_id=-2
-                    )
-                    db_items.append(item)
-                    next_id += 1
-                
-                if db_items:
-                    knowledge_storage.add(db_items)
-                    
-                process_metadata[task_id]["processed_chunks"] = current_page
-                print(f"[PDF BATCH] Processed up to page {current_page}/{total_pages}. RAM: {ram_mb:.0f} MB")
-                
-                # Explicit memory purge
-                del db_items
-                del batch_chunks
-                del texts_to_encode
-                del batch_vectors
-                batch_chunks = []
-                batch_count += 1
-                
-                if batch_count % 5 == 0:
-                    gc.collect()
 
-        # Final flush
-        if batch_chunks:
-            db_items = []
-            texts_to_encode = [b_chunk.text for b_chunk in batch_chunks]
-            batch_vectors = embedder.encode(texts_to_encode)
+        print(f"📄 [TASK {task_id}] Abriendo PDF con PyMuPDF...")
+        doc = fitz.open(file_path)
+        total_pages = doc.page_count
+        print(f"📄 [TASK {task_id}] PDF abierto. Total páginas: {total_pages}")
+        
+        process_metadata[task_id]["total_chunks"] = total_pages 
+        process_metadata[task_id]["processed_chunks"] = 0
+        process_metadata[task_id]["start_time"] = time.time()
+        
+        ingestor = Ingestor(chunk_size=2048, chunk_overlap=200)
+        
+        # 1. Fase de Extracción
+        all_chunks = []
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            if text:
+                all_chunks.extend(list(ingestor._chunk_text(text, source=filename, page=i+1)))
+            process_metadata[task_id]["processed_chunks"] = i + 1
+            print(f"🔍 [TASK {task_id}] Extraída página {i+1}/{total_pages}")
             
-            for i, b_chunk in enumerate(batch_chunks):
-                vector = batch_vectors[i]
-                item = DBItem(
-                    id=next_id,
-                    text=b_chunk.text,
-                    vector=vector.tolist() if hasattr(vector, 'tolist') else list(vector),
-                    metadata={"source": filename, **b_chunk.metadata},
-                    cluster_label="SOVEREIGN_KNOWLEDGE",
-                    cluster_id=-2
-                )
-                db_items.append(item)
+        doc.close()
+        print(f"🧠 [TASK {task_id}] Extracción completa. Total fragmentos: {len(all_chunks)}. Iniciando Inferencia MPS...")
+        
+        # 2. Fase de Inferencia en GPU
+        batch_size = 128
+        all_db_items = []
+        next_id = 20000
+        
+        for i in range(0, len(all_chunks), batch_size):
+            batch = all_chunks[i:i+batch_size]
+            texts = [c.text for c in batch]
+            
+            vectors = embedder.encode(texts)
+            
+            for idx, c in enumerate(batch):
+                all_db_items.append(DBItem(
+                    id=next_id, text=c.text, vector=vectors[idx].tolist(),
+                    metadata=c.metadata, cluster_label="SOVEREIGN_KNOWLEDGE", cluster_id=-2
+                ))
                 next_id += 1
                 
-            if db_items:
-                knowledge_storage.add(db_items)
-                
-            process = psutil.Process()
-            ram_mb = process.memory_info().rss / (1024 * 1024)
-            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
-            process_metadata[task_id]["processed_chunks"] = total_pages
-            
-            del db_items
-            del batch_chunks
+            process_metadata[task_id]["ram_usage_mb"] = int(psutil.Process().memory_info().rss / 1024 / 1024)
+            print(f"⚡ [TASK {task_id}] Batch procesado ({min(i+batch_size, len(all_chunks))}/{len(all_chunks)})")
             gc.collect()
 
+        # 3. Fase de I/O
+        if all_db_items:
+            print(f"💾 [TASK {task_id}] Guardando {len(all_db_items)} vectores en LanceDB...")
+            knowledge_storage.add(all_db_items)
+
         process_metadata[task_id]["status"] = "completed"
-        
+        print(f"✅ [TASK {task_id}] Ingesta Finalizada con éxito.")
     except Exception as e:
-        print(f"[PDF ERROR] Task {task_id} failed: {e}")
         process_metadata[task_id]["status"] = "error"
+        print(f"❌ [TASK {task_id}] ERROR FATAL: {e}")
     finally:
-        try:
-            if file_path.exists():
-                file_path.unlink()
-        except:
-            pass
+        if file_path.exists(): file_path.unlink()
+        gc.collect()
+
+# --- Modificamos la ruta de Upload para usar asyncio.to_thread ---
+@router.post("/corpus/upload-pdf")
+async def upload_pdf(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+            
+        task_id = str(uuid.uuid4())
+        
+        process_metadata[task_id] = {
+            "status": "processing",
+            "total_chunks": 0,
+            "processed_chunks": 0,
+            "ram_usage_mb": 0,
+            "start_time": time.time()
+        }
+        
+        # EL CAMBIO CLAVE: Usamos to_thread para no bloquear FastAPI
+        background_tasks.add_task(
+            asyncio.to_thread,
+            process_pdf_background,
+            task_id,
+            tmp_path,
+            file.filename,
+            embedder,
+            knowledge_storage
+        )
+        
+        return {"status": "success", "task_id": task_id, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Routes ---
 
@@ -519,41 +497,7 @@ async def chat_endpoint(
             
     return StreamingResponse(chat_generator(), media_type="application/x-ndjson")
 
-@router.post("/corpus/upload-pdf")
-async def upload_pdf(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    embedder: Embedder = Depends(get_embedder),
-    knowledge_storage: Storage = Depends(get_knowledge_storage)
-):
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(await file.read())
-            tmp_path = Path(tmp.name)
-            
-        task_id = str(uuid.uuid4())
-        
-        # Initialize registry state immediately
-        process_metadata[task_id] = {
-            "status": "processing",
-            "total_chunks": 0,
-            "processed_chunks": 0,
-            "ram_usage_mb": 0,
-            "start_time": time.time()
-        }
-        
-        background_tasks.add_task(
-            process_pdf_background,
-            task_id,
-            tmp_path,
-            file.filename,
-            embedder,
-            knowledge_storage
-        )
-        
-        return {"status": "success", "task_id": task_id, "filename": file.filename}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/corpus/task-status/{task_id}")
 async def task_status(task_id: str):
@@ -1574,14 +1518,43 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 class Settings(BaseSettings):
+    APP_NAME: str = "LSV Engine"
+    API_V1_STR: str = "/api/v1"
+    DEBUG: bool = False
+    FIREWALL_THRESHOLD: float = 0.45
+    LOAD_DEMOS: bool = False
+    
+    # --- MODO CATANGA ---
+    INGEST_BATCH_SIZE: int = 128
+    INGEST_CHUNK_SIZE: int = 2048
+    INGEST_CHUNK_OVERLAP_PCT: float = 0.10
+    
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
+    DATA_DIR: Path = BASE_DIR / "data"
+    LANCEDB_URI: Path = DATA_DIR / "lancedb"
+    CONTEXT_DB_PATH: Path = DATA_DIR / "context.db"
+    VOCAB_PATH: Path = BASE_DIR.parent / "public" / "vocab.txt" 
+    
+    MODEL_NAME: str = "BAAI/bge-m3"
+    DEVICE: str = "mps" # Forzamos la GPU de Apple
+    HF_TOKEN: Optional[str] = None
+    HF_HUB_ETAG_TIMEOUT: int = 30
+    HF_HUB_DOWNLOAD_TIMEOUT: int = 300
+    VECTOR_DIM: int = 1024
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore" # Evita que el server explote
+
     # App Config
     APP_NAME: str = "LSV Engine"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
     FIREWALL_THRESHOLD: float = 0.45
     LOAD_DEMOS: bool = False
-    INGEST_BATCH_SIZE: int = 32
-    INGEST_CHUNK_OVERLAP_PCT: float = 0.15
+    INGEST_BATCH_SIZE: int = 128
+    INGEST_CHUNK_SIZE: int = 2048
+    INGEST_CHUNK_OVERLAP_PCT: float = 0.10
     
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -1596,7 +1569,7 @@ class Settings(BaseSettings):
     
     # Model Config
     MODEL_NAME: str = "BAAI/bge-m3"
-    DEVICE: str = "cpu" # 'cuda' if available
+    DEVICE: str = "mps" # 'cuda' if available
     HF_TOKEN: Optional[str] = None
     HF_HUB_ETAG_TIMEOUT: int = 30
     HF_HUB_DOWNLOAD_TIMEOUT: int = 300
@@ -2212,7 +2185,7 @@ class LocalHFStrategy(EmbedderStrategy):
     def load(self):
         if self.model is None:
             print(f"🔌 Loading Local Model: {self.model_name} on {self.device}...")
-            self.model = SentenceTransformer(self.model_name, device=self.device)
+            self.model = SentenceTransformer('BAAI/bge-m3', device='mps')#(self.model_name, device=self.device)
             self._dim = self.model.get_sentence_embedding_dimension()
 
     def unload(self):
@@ -2404,7 +2377,11 @@ class Ingestor:
                     chunk_text = text[start:end]
             
             yield Chunk(text=chunk_text, metadata=metadata)
-            start += (len(chunk_text) - self.chunk_overlap)
+            
+            step = len(chunk_text) - self.chunk_overlap
+            if step <= 0:
+                break
+            start += step
 
 ################################################################################
 FILE: backend/ingest_vocab.py
@@ -3489,6 +3466,48 @@ def test_system_stats_endpoint():
         log_fail(f"Exception: {e}")
         return False
 
+def test_pdf_ingestion_non_blocking_and_imports():
+    log_section("Testing PDF Ingestion Non-Blocking and Imports (/corpus/upload-pdf)")
+    try:
+        import time
+        files = {'file': ('dummy_test.pdf', b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 21 >>\nstream\nBT /F1 24 Tf 100 700 Td (Hello World) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000214 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n285\n%%EOF\n', 'application/pdf')}
+        
+        start_t = time.time()
+        r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
+        end_t = time.time()
+        
+        if r.status_code != 200:
+            log_fail(f"Upload failed: {r.text}")
+            return False
+        
+        if (end_t - start_t) > 2.0:
+            log_fail(f"Endpoint blocked! Took {end_t - start_t:.2f}s instead of returning immediately.")
+            return False
+            
+        task_id = r.json().get("task_id")
+        
+        # Poll status
+        for _ in range(10):
+            time.sleep(1)
+            status_r = httpx.get(f"{BASE_URL}/corpus/task-status/{task_id}", timeout=TIMEOUT)
+            if status_r.status_code == 200:
+                status_data = status_r.json()
+                if status_data.get("status") == "completed":
+                    log_success("PDF Ingestion Non-Blocking and Imports OK (Completed without errors)")
+                    return True
+                elif status_data.get("status") == "error":
+                    log_fail("Background ingestion failed (NameError or other exception).")
+                    return False
+            elif status_r.status_code == 500:
+                log_fail(f"Status endpoint threw 500: {status_r.text}")
+                return False
+                
+        log_success("PDF Ingestion Non-Blocking OK (Still processing, but no crash detected)")
+        return True
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
 def main():
     tests = [
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
@@ -3499,7 +3518,8 @@ def main():
         test_firewall_trigger_logic, test_single_baseline_l2_audit, test_l2_bounding_box_math,
         test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
         test_bge_m3_vector_parity_chat_prompt, test_async_pdf_upload_task_creation, test_task_status_endpoint, test_firewall_interceptor_blocking,
-        test_task_status_ram_telemetry, test_streaming_ingestor_generator, test_system_stats_endpoint
+        test_task_status_ram_telemetry, test_streaming_ingestor_generator, test_system_stats_endpoint,
+        test_etr_telemetry_math, test_pdf_ingestion_non_blocking_and_imports
     ]
     all_passed = True
     for test in tests:
@@ -3514,13 +3534,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Adding to main execution routine
-if __name__ == "__main__":
-    tests = [
-        test_etr_telemetry_math,
-        # (Assuming the runner is already properly set up, we just needed the function added)
-    ]
 
 ################################################################################
 FILE: setup_wizard.py
@@ -4025,9 +4038,8 @@ VECTOR_DIM=1024
 LANCEDB_URI="./data/lancedb"
 CONTEXT_DB_PATH="./data/context.db"
 DEBUG=True
-INGEST_BATCH_SIZE=64
 INGEST_BATCH_SIZE=128
-INGEST_BATCH_SIZE=16
+INGEST_CHUNK_SIZE=2048
 
 ################################################################################
 FILE: frontend/src/main.tsx
