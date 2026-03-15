@@ -51,7 +51,7 @@ class LocalHFStrategy(EmbedderStrategy):
     def load(self):
         if self.model is None:
             print(f"🔌 Loading Local Model: {self.model_name} on {self.device}...")
-            self.model = SentenceTransformer(self.model_name, device=self.device)
+            self.model = SentenceTransformer('BAAI/bge-m3', device='mps')#(self.model_name, device=self.device)
             self._dim = self.model.get_sentence_embedding_dimension()
 
     def unload(self):

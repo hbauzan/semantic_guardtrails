@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     FIREWALL_THRESHOLD: float = 0.45
     LOAD_DEMOS: bool = False
-    INGEST_BATCH_SIZE: int = 32
-    INGEST_CHUNK_OVERLAP_PCT: float = 0.15
+    INGEST_BATCH_SIZE: int = 128
+    INGEST_CHUNK_SIZE: int = 2048
+    INGEST_CHUNK_OVERLAP_PCT: float = 0.10
     
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     
     # Model Config
     MODEL_NAME: str = "BAAI/bge-m3"
-    DEVICE: str = "cpu" # 'cuda' if available
+    DEVICE: str = "mps" # 'cuda' if available
     HF_TOKEN: Optional[str] = None
     HF_HUB_ETAG_TIMEOUT: int = 30
     HF_HUB_DOWNLOAD_TIMEOUT: int = 300

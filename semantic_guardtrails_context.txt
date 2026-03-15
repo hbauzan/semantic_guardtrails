@@ -1,4 +1,4 @@
-SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 20:20:22.810686
+SEMANTIC GUARDRAILS CONTEXT BUNDLE // GENERATED: 2026-03-14 20:50:49.708761
 
 
 ################################################################################
@@ -334,12 +334,18 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
             
             if len(batch_chunks) >= batch_size:
                 db_items = []
-                for b_chunk in batch_chunks:
-                    vector = embedder.encode(b_chunk.text)
+                
+                # --- VERDADERO BATCHING PARA M4 PRO ---
+                # Pasamos la lista entera de textos al modelo para inferencia paralela
+                texts_to_encode = [b_chunk.text for b_chunk in batch_chunks]
+                batch_vectors = embedder.encode(texts_to_encode)
+                
+                for i, b_chunk in enumerate(batch_chunks):
+                    vector = batch_vectors[i]
                     item = DBItem(
                         id=next_id,
                         text=b_chunk.text,
-                        vector=vector.tolist(),
+                        vector=vector.tolist() if hasattr(vector, 'tolist') else list(vector),
                         metadata={"source": filename, **b_chunk.metadata},
                         cluster_label="SOVEREIGN_KNOWLEDGE",
                         cluster_id=-2
@@ -356,6 +362,8 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
                 # Explicit memory purge
                 del db_items
                 del batch_chunks
+                del texts_to_encode
+                del batch_vectors
                 batch_chunks = []
                 batch_count += 1
                 
@@ -365,18 +373,22 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
         # Final flush
         if batch_chunks:
             db_items = []
-            for b_chunk in batch_chunks:
-                vector = embedder.encode(b_chunk.text)
+            texts_to_encode = [b_chunk.text for b_chunk in batch_chunks]
+            batch_vectors = embedder.encode(texts_to_encode)
+            
+            for i, b_chunk in enumerate(batch_chunks):
+                vector = batch_vectors[i]
                 item = DBItem(
                     id=next_id,
                     text=b_chunk.text,
-                    vector=vector.tolist(),
+                    vector=vector.tolist() if hasattr(vector, 'tolist') else list(vector),
                     metadata={"source": filename, **b_chunk.metadata},
                     cluster_label="SOVEREIGN_KNOWLEDGE",
                     cluster_id=-2
                 )
                 db_items.append(item)
                 next_id += 1
+                
             if db_items:
                 knowledge_storage.add(db_items)
                 
@@ -405,6 +417,8 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
 
 def get_directory_size(path: Path) -> float:
     total_size = 0
+    if not os.path.exists(path):
+        return 0.0
     for dirpath, _, filenames in os.walk(path):
         for f in filenames:
             fp = os.path.join(dirpath, f)
@@ -524,7 +538,8 @@ async def upload_pdf(
             "status": "processing",
             "total_chunks": 0,
             "processed_chunks": 0,
-            "ram_usage_mb": 0
+            "ram_usage_mb": 0,
+            "start_time": time.time()
         }
         
         background_tasks.add_task(
@@ -544,7 +559,12 @@ async def upload_pdf(
 async def task_status(task_id: str):
     if task_id not in process_metadata:
         raise HTTPException(status_code=404, detail="Task not found")
-    return process_metadata[task_id]
+        
+    meta = process_metadata[task_id]
+    if "start_time" in meta and meta.get("status") == "processing":
+        meta["elapsed_seconds"] = int(time.time() - meta["start_time"])
+        
+    return meta
 
 @router.post("/galaxy/simulate")
 async def simulate_query(
@@ -1245,7 +1265,6 @@ async def get_node_neighbors(
         "node_id": node_id,
         "neighbors": neighbors
     }
-
 ################################################################################
 FILE: README.md
 ################################################################################
@@ -2316,7 +2335,7 @@ class Chunk(BaseModel):
     metadata: dict
 
 class Ingestor:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, chunk_size: int = 2048, chunk_overlap: int = 256):
         self.chunk_size = chunk_size
         # Dynamically calculated if specific overlap not provided
         self.chunk_overlap = int(chunk_size * settings.INGEST_CHUNK_OVERLAP_PCT) if chunk_overlap == 50 else chunk_overlap
@@ -4006,6 +4025,9 @@ VECTOR_DIM=1024
 LANCEDB_URI="./data/lancedb"
 CONTEXT_DB_PATH="./data/context.db"
 DEBUG=True
+INGEST_BATCH_SIZE=64
+INGEST_BATCH_SIZE=128
+INGEST_BATCH_SIZE=16
 
 ################################################################################
 FILE: frontend/src/main.tsx

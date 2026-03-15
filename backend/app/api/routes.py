@@ -73,125 +73,71 @@ process_metadata: Dict[str, Any] = {}
 def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
     try:
         process_metadata[task_id]["status"] = "processing"
-        
-        import fitz
-        import psutil
-        import gc
-        
-        try:
-            doc = fitz.open(file_path)
-            total_pages = doc.page_count
-            doc.close()
-        except Exception:
-            total_pages = 1
-            
-        process_metadata[task_id]["total_chunks"] = total_pages
+        import fitz, psutil, gc, time
+
+        doc = fitz.open(file_path)
+        total_pages = doc.page_count
+        process_metadata[task_id]["total_chunks"] = total_pages 
         process_metadata[task_id]["processed_chunks"] = 0
-        process_metadata[task_id]["ram_usage_mb"] = 0
         
-        ingestor = Ingestor()
-        chunk_generator = ingestor.load_file(file_path)
-        
-        df = knowledge_storage.get_all_vectors()
+        ingestor = Ingestor(chunk_size=2048, chunk_overlap=200) # Bloques grandes para el M4
         next_id = 20000
-        if not df.empty and 'id' in df.columns:
-            existing_ids = df['id'].tolist()
-            if existing_ids:
-                next_id = max(existing_ids) + 1
-        
-        batch_size = settings.INGEST_BATCH_SIZE
+        batch_size = 128 # Ráfaga de 128 vectores en paralelo
         batch_chunks = []
-        batch_count = 0
-        current_page = 0
         
-        for chunk in chunk_generator:
-            # RSS Hard Cap Monitor
-            process = psutil.Process()
-            rss_bytes = process.memory_info().rss
-            ram_mb = rss_bytes / (1024 * 1024)
-            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            if not text: continue
             
-            if rss_bytes > (4 * 1024 * 1024 * 1024):
-                print(f"[CRITICAL_MEMORY_ABORT] Task {task_id} exceeded 4GB RAM threshold ({ram_mb:.0f} MB). Terminating.")
-                process_metadata[task_id]["status"] = "CRITICAL_MEMORY_ABORT"
-                return
+            # Pica la página en trozos
+            page_chunks = list(ingestor._chunk_text(text, source=filename, page=i+1))
+            batch_chunks.extend(page_chunks)
+            
+            # Si llenamos el pallet o es la última página, disparamos a la GPU
+            if len(batch_chunks) >= batch_size or i == total_pages - 1:
+                if not batch_chunks: continue
                 
-            batch_chunks.append(chunk)
-            current_page = max(current_page, chunk.metadata.get("page", 1))
-            
-            if len(batch_chunks) >= batch_size:
-                db_items = []
-                for b_chunk in batch_chunks:
-                    vector = embedder.encode(b_chunk.text)
-                    item = DBItem(
-                        id=next_id,
-                        text=b_chunk.text,
-                        vector=vector.tolist(),
-                        metadata={"source": filename, **b_chunk.metadata},
+                # INFERENCIA MASIVA MPS
+                texts = [c.text for c in batch_chunks]
+                vectors = embedder.encode(texts) # Aquí es donde el MPS vuela
+                
+                db_items = [
+                    DBItem(
+                        id=next_id + idx,
+                        text=c.text,
+                        vector=vectors[idx].tolist(),
+                        metadata=c.metadata,
                         cluster_label="SOVEREIGN_KNOWLEDGE",
                         cluster_id=-2
-                    )
-                    db_items.append(item)
-                    next_id += 1
+                    ) for idx, c in enumerate(batch_chunks)
+                ]
                 
-                if db_items:
-                    knowledge_storage.add(db_items)
-                    
-                process_metadata[task_id]["processed_chunks"] = current_page
-                print(f"[PDF BATCH] Processed up to page {current_page}/{total_pages}. RAM: {ram_mb:.0f} MB")
-                
-                # Explicit memory purge
-                del db_items
-                del batch_chunks
-                batch_chunks = []
-                batch_count += 1
-                
-                if batch_count % 5 == 0:
-                    gc.collect()
-
-        # Final flush
-        if batch_chunks:
-            db_items = []
-            for b_chunk in batch_chunks:
-                vector = embedder.encode(b_chunk.text)
-                item = DBItem(
-                    id=next_id,
-                    text=b_chunk.text,
-                    vector=vector.tolist(),
-                    metadata={"source": filename, **b_chunk.metadata},
-                    cluster_label="SOVEREIGN_KNOWLEDGE",
-                    cluster_id=-2
-                )
-                db_items.append(item)
-                next_id += 1
-            if db_items:
                 knowledge_storage.add(db_items)
+                next_id += len(db_items)
                 
-            process = psutil.Process()
-            ram_mb = process.memory_info().rss / (1024 * 1024)
-            process_metadata[task_id]["ram_usage_mb"] = int(ram_mb)
-            process_metadata[task_id]["processed_chunks"] = total_pages
-            
-            del db_items
-            del batch_chunks
-            gc.collect()
+                # Telemetría para el Mono
+                process_metadata[task_id]["processed_chunks"] = i + 1
+                process_metadata[task_id]["ram_usage_mb"] = int(psutil.Process().memory_info().rss / 1024 / 1024)
+                
+                # Limpieza agresiva
+                del db_items, texts, vectors, batch_chunks
+                batch_chunks = []
+                gc.collect()
 
         process_metadata[task_id]["status"] = "completed"
-        
     except Exception as e:
-        print(f"[PDF ERROR] Task {task_id} failed: {e}")
         process_metadata[task_id]["status"] = "error"
+        print(f"FATAL: {e}")
     finally:
-        try:
-            if file_path.exists():
-                file_path.unlink()
-        except:
-            pass
-
+        doc.close()
+        if file_path.exists(): file_path.unlink()
+        
 # --- Routes ---
 
 def get_directory_size(path: Path) -> float:
     total_size = 0
+    if not os.path.exists(path):
+        return 0.0
     for dirpath, _, filenames in os.walk(path):
         for f in filenames:
             fp = os.path.join(dirpath, f)
@@ -311,7 +257,8 @@ async def upload_pdf(
             "status": "processing",
             "total_chunks": 0,
             "processed_chunks": 0,
-            "ram_usage_mb": 0
+            "ram_usage_mb": 0,
+            "start_time": time.time()
         }
         
         background_tasks.add_task(
@@ -331,7 +278,12 @@ async def upload_pdf(
 async def task_status(task_id: str):
     if task_id not in process_metadata:
         raise HTTPException(status_code=404, detail="Task not found")
-    return process_metadata[task_id]
+        
+    meta = process_metadata[task_id]
+    if "start_time" in meta and meta.get("status") == "processing":
+        meta["elapsed_seconds"] = int(time.time() - meta["start_time"])
+        
+    return meta
 
 @router.post("/galaxy/simulate")
 async def simulate_query(

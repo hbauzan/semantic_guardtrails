@@ -9,7 +9,7 @@ class Chunk(BaseModel):
     metadata: dict
 
 class Ingestor:
-    def __init__(self, chunk_size: int = 1024, chunk_overlap: int = 100):
+    def __init__(self, chunk_size: int = 2048, chunk_overlap: int = 256):
         self.chunk_size = chunk_size
         # Dynamically calculated if specific overlap not provided
         self.chunk_overlap = int(chunk_size * settings.INGEST_CHUNK_OVERLAP_PCT) if chunk_overlap == 50 else chunk_overlap
