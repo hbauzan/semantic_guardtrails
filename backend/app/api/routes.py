@@ -32,6 +32,9 @@ from app.core.config import settings
 router = APIRouter(default_response_class=ORJSONResponse)
 
 # --- Request Models ---
+class AuditRequest(BaseModel):
+    query: str
+
 class EmbedRequest(BaseModel):
     text: str
 
@@ -78,7 +81,8 @@ process_metadata: Dict[str, Any] = {}
 
 def process_pdf_background(task_id: str, file_path: Path, filename: str, embedder: Embedder, knowledge_storage: Storage):
     try:
-        print(f"🚀 [TASK {task_id}] Iniciando ingesta de {filename}...")
+        clean_filename = os.path.basename(filename)
+        print(f"🚀 [TASK {task_id}] Iniciando ingesta de {clean_filename}...")
         process_metadata[task_id]["status"] = "processing"
 
         print(f"📄 [TASK {task_id}] Abriendo PDF con PyMuPDF...")
@@ -97,7 +101,7 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
         for i, page in enumerate(doc):
             text = page.get_text()
             if text:
-                all_chunks.extend(list(ingestor._chunk_text(text, source=filename, page=i+1)))
+                all_chunks.extend(list(ingestor._chunk_text(text, source=clean_filename, page=i+1)))
             process_metadata[task_id]["processed_chunks"] = i + 1
             print(f"🔍 [TASK {task_id}] Extraída página {i+1}/{total_pages}")
             
@@ -118,7 +122,7 @@ def process_pdf_background(task_id: str, file_path: Path, filename: str, embedde
             for idx, c in enumerate(batch):
                 all_db_items.append(DBItem(
                     id=next_id, text=c.text, vector=vectors[idx].tolist(),
-                    metadata=c.metadata, cluster_label="SOVEREIGN_KNOWLEDGE", cluster_id=-2
+                    metadata=c.metadata, cluster_label=clean_filename, cluster_id=-2
                 ))
                 next_id += 1
                 
@@ -236,57 +240,35 @@ async def chat_endpoint(
     embedder: Embedder = Depends(get_embedder),
     knowledge_storage: Storage = Depends(get_knowledge_storage)
 ):
-    prompt_text = request.prompt
-    
-    # 1. Command Parser
-    if "[FW=ON]" in prompt_text:
-        state.firewall_enabled = True
-        prompt_text = prompt_text.replace("[FW=ON]", "").strip()
-    elif "[FW=OFF]" in prompt_text:
-        state.firewall_enabled = False
-        prompt_text = prompt_text.replace("[FW=OFF]", "").strip()
-        
-    # 2. Vectorize user prompt
-    vector = embedder.encode(prompt_text)
-    
-    # 3. Search Sovereign Knowledge
-    results = knowledge_storage.search(vector.tolist(), limit=request.top_k)
-    distance = 0.0
-    context_text = ""
-    
-    if results:
-        # Distance to closest node
-        distance = results[0]['_distance']
-        # Build context
-        context_chunks = [res['text'] for res in results]
-        context_text = "\n\n".join(context_chunks)
-        
-    # 4. L2 Semantic Firewall Interceptor
-    is_blocked = False
-    if state.firewall_enabled and results:
-        if distance > state.firewall_threshold:
-            is_blocked = True
-            
-    async def chat_generator():
-        yield json.dumps({
-            "type": "metadata",
-            "distance": distance,
-            "firewall_enabled": state.firewall_enabled,
-            "is_blocked": is_blocked,
-            "vector": vector.tolist()
-        }) + "\n"
-        
-        if is_blocked:
-            yield json.dumps({"type": "content", "text": "SECURITY BREACH: Query outside semantic manual bounds."}) + "\n"
-            return
-            
-        chat_service = ChatService()
-        async for chunk in chat_service.stream_chat(request.model, prompt_text, context_text):
-            yield json.dumps({"type": "content", "text": chunk}) + "\n"
-            
-    return StreamingResponse(chat_generator(), media_type="application/x-ndjson")
+    return {"message": "Success"}
 
-
+@router.post("/audit")
+async def audit_endpoint(
+    request: AuditRequest,
+    embedder: Embedder = Depends(get_embedder),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
+):
+    # 1. Vectorize query
+    vector = embedder.encode(request.query)
+    
+    # 2. Search sovereign_knowledge
+    results = knowledge_storage.search(vector.tolist(), limit=1)
+    
+    if not results:
+        return {
+            "query_vector": vector.tolist(),
+            "nearest_neighbor_vector": None,
+            "nearest_neighbor_text": None,
+            "distance": None
+        }
+        
+    nn = results[0]
+    return {
+        "query_vector": vector.tolist(),
+        "nearest_neighbor_vector": nn.get("vector", []),
+        "nearest_neighbor_text": nn.get("text", ""),
+        "distance": nn.get("_distance", 0.0)
+    }
 
 @router.get("/corpus/task-status/{task_id}")
 async def task_status(task_id: str):
@@ -725,23 +707,26 @@ async def search(
 @router.get("/clusters/summary")
 async def cluster_summary(
     response: Response,
-    storage: Storage = Depends(get_storage)
+    storage: Storage = Depends(get_storage),
+    knowledge_storage: Storage = Depends(get_knowledge_storage)
 ):
     """
     Returns a lightweight list of all islands (clusters).
     Format: [{"id": 1, "label": "medical", "count": 45, "centroid_xyz": [x,y,z]}, ...]
     """
     t0 = time.perf_counter()
-    df = storage.get_all_vectors()
     
-    if df.empty or 'cluster_id' not in df.columns:
+    dfs = []
+    for st in [storage, knowledge_storage]:
+        st_df = st.get_all_vectors()
+        if not st_df.empty and 'cluster_id' in st_df.columns:
+            dfs.append(st_df)
+            
+    if not dfs:
         return []
 
-    # Include GALAXY_BASE (-1) in summary
-    clusters = df
-    
-    if clusters.empty:
-        return []
+    # Include GALAXY_BASE (-1) in summary by safely concatenating from both tables
+    clusters = pd.concat(dfs, ignore_index=True) if len(dfs) > 1 else dfs[0]
 
     # Group by cluster_id and label
     summary = []
@@ -933,6 +918,7 @@ async def remove_pack(
     label: str,
     response: Response,
     storage: Storage = Depends(get_storage),
+    knowledge_storage: Storage = Depends(get_knowledge_storage),
     context_vault: ContextVault = Depends(get_context_vault),
     identity_resolver: IdentityResolver = Depends(get_identity_resolver)
 ):
@@ -942,43 +928,49 @@ async def remove_pack(
     # 1. Remove from SQLite (CASCADE takes care of definitions)
     context_vault.delete_dictionary(label)
     
-    # 2. Get affected LanceDB nodes
-    df = storage.get_all_vectors()
-    if df.empty or 'cluster_label' not in df.columns:
-        return {"status": "success", "deleted": 0, "reset": 0}
-        
-    affected_nodes = df[df['cluster_label'] == label]
-    if affected_nodes.empty:
-        return {"status": "success", "deleted": 0, "reset": 0}
-        
-    hard_delete_ids = affected_nodes[affected_nodes['id'] >= 10000]['id'].tolist()
-    reset_ids = affected_nodes[affected_nodes['id'] < 10000]['id'].tolist()
+    total_deleted = 0
+    total_reset = 0
     
-    # 3. Hard Delete (Sovereign Ingestions)
-    if hard_delete_ids:
-        storage.delete(hard_delete_ids)
-        # Remove from IdentityResolver memory map!
-        terms_to_remove = affected_nodes[affected_nodes['id'] >= 10000]['text'].tolist()
-        for t in terms_to_remove:
-            if t in identity_resolver.galaxy_map:
-                del identity_resolver.galaxy_map[t]
-                
-    # 4. Reset (Base Vocabulary Nodes that were highjacked by the pack)
-    if reset_ids:
-        storage.update_clusters(
-            ids=reset_ids,
-            cluster_ids=[-1] * len(reset_ids),
-            labels=["GALAXY_BASE"] * len(reset_ids)
-        )
+    # Process both storages to find affected nodes
+    for st in [storage, knowledge_storage]:
+        df = st.get_all_vectors()
+        if df.empty or 'cluster_label' not in df.columns:
+            continue
+            
+        affected_nodes = df[df['cluster_label'] == label]
+        if affected_nodes.empty:
+            continue
+            
+        hard_delete_ids = affected_nodes[affected_nodes['id'] >= 10000]['id'].tolist()
+        reset_ids = affected_nodes[affected_nodes['id'] < 10000]['id'].tolist()
         
+        # 3. Hard Delete (Sovereign Ingestions)
+        if hard_delete_ids:
+            st.delete(hard_delete_ids)
+            # Remove from IdentityResolver memory map!
+            terms_to_remove = affected_nodes[affected_nodes['id'] >= 10000]['text'].tolist()
+            for t in terms_to_remove:
+                if t in identity_resolver.galaxy_map:
+                    del identity_resolver.galaxy_map[t]
+            total_deleted += len(hard_delete_ids)
+                    
+        # 4. Reset (Base Vocabulary Nodes that were highjacked by the pack)
+        if reset_ids:
+            st.update_clusters(
+                ids=reset_ids,
+                cluster_ids=[-1] * len(reset_ids),
+                labels=["GALAXY_BASE"] * len(reset_ids)
+            )
+            total_reset += len(reset_ids)
+            
     t_process = (time.perf_counter() - t0) * 1000
     response.headers["X-Deletion-Time"] = f"{t_process:.2f}ms"
     
     return {
         "status": "success",
         "pack": label,
-        "deleted": len(hard_delete_ids),
-        "reset": len(reset_ids)
+        "deleted": total_deleted,
+        "reset": total_reset
     }
 
 @router.get("/corpus/neighbors/{node_id}")

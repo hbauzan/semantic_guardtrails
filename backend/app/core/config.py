@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "LSV Engine"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-    FIREWALL_THRESHOLD: float = 0.45
+    FIREWALL_THRESHOLD: float = 20.0
     LOAD_DEMOS: bool = False
     
     # --- MODO CATANGA ---
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "LSV Engine"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-    FIREWALL_THRESHOLD: float = 0.45
+    FIREWALL_THRESHOLD: float = 20.0
     LOAD_DEMOS: bool = False
     INGEST_BATCH_SIZE: int = 128
     INGEST_CHUNK_SIZE: int = 2048

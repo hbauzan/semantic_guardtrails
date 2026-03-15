@@ -5,7 +5,8 @@
         "neural_core_bge_m3": true,
         "vector_arithmetic": false,
         "minimalist_auditor_ui": true,
-        "single_baseline_audit": true,
+        "single_baseline_audit": false,
+        "nearest_neighbor_firewall": true,
         "context_packager": true,
         "flight_mechanics_awsd": true,
         "exponential_thrust_shift": true,
@@ -59,7 +60,9 @@
         "resource_telemetry_enabled": true,
         "ascii_monkey_hud": true,
         "animated_ascii_hud": true,
-        "etr_timer_active": true
+        "etr_timer_active": true,
+        "dual_storage_document_manager": true,
+        "realtime_firewall_sync": true
     },
     "constraints": {
         "manifold_bounds": [

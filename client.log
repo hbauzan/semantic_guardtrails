@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "<string>", line 2, in <module>
+    import httpx
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/__init__.py", line 2, in <module>
+    from ._api import *
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_api.py", line 6, in <module>
+    from ._client import Client
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_client.py", line 13, in <module>
+    from ._auth import Auth, BasicAuth, FunctionAuth
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_auth.py", line 9, in <module>
+    from urllib.request import parse_http_list
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 89, in <module>
+    import http.client
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1470, in <module>
+    import ssl
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 100, in <module>
+    import _ssl             # if we can't import it, let the error propagate
+    ^^^^^^^^^^^
+KeyboardInterrupt

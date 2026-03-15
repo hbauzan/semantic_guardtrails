@@ -15,8 +15,10 @@
 * **Knowledge Ingestion (PyMuPDF):** Processes PDF documentation asynchronously utilizing `fastapi.BackgroundTasks` and `asyncio.to_thread` offloading to prevent Main Event Loop blocking. Employs a **Generator-based Streaming** architecture yielding processed chunks dynamically, discarding batches continually via absolute object deletion and mandatory `gc.collect()`.
 * **RSS Hard Memory Cap ($4.0$ GB)**: Utilizes `psutil` natively monitoring `rss_bytes` inside ingestion workers. Upon exceeding memory bounds, process initiates `CRITICAL_MEMORY_ABORT`.
 * **Vectorization Telemetry Engine**: Exposes real-time memory usage alongside processed pages via `/corpus/task-status/{task_id}` for native telemetry HUD visualization during processing. 
+* **Dual-Storage Document Manager:** The HUD Document Manager aggregates queries and handles state removals across both the default vector vault (`vectors_BAAI_bge_m3_1024`) and the `sovereign_knowledge` vault to ensure all contextual datasets are unified in the UI.
 * **Ollama Motor Integration:** `ChatService` bridges streaming generation utilizing `llama3.1`.
-* **L2 Semantic Firewall Interceptor:** Evaluates inbound chat prompts against the `sovereign_knowledge` vectors using Euclidean Distance ($D_n$). Intercepts and blocks responses if divergence threshold is exceeded and `[FW=ON]` is active.
+* **L2 Semantic Firewall Interceptor:** Evaluates inbound chat prompts against the `sovereign_knowledge` vectors using Nearest-Neighbor (K=1) distance metric ($D_n$). Intercepts and blocks responses if divergence threshold is exceeded or if the DB is empty when `[FW=ON]` is active (Fail-secure). The engine's threshold parameter ($D_{fire}$) is synchronized in real-time with the Auditor Console UI via debounced HTTP POSTs, providing zero-latency live threshold testing. 
+* **Post-Firewall Context Injection:** When a query passes the firewall ($D_n \\le 20.0$), the system retrieves the top 5 relevant chunks. The text content of these chunks, along with their metadata (Document name and Page number), is securely formatted and injected directly into the Ollama system prompt to guarantee contextual grounding.
 
 ## 5. Commander Interface (TUI)
 * **Primary Operational Entry Point**: `run_commander.sh` provides a DOS/Commander style text user interface integrating the Sovereign AI controls, automated testing, and engine boot sequences.
@@ -47,9 +49,9 @@
 
 ### The Dual-Zone Auditor's Console
 The UI has been refactored into a **Dual-Zone Security Console**, purging old vector arithmetic visualizations.
-*   **Zone Alpha (Master Baseline)**: A single input query rigidly fixed at `[0,0,0]`.
-*   **Zone Beta (Stress Test Sandbox)**: Compares `STRESS_TEST_QUERY` vector against the Master Baseline using $D_n$.
-*   **Firewall Logic Threshold ($D_{fire}$)**: If distance to `STRESS` $\ge D_{fire}$, HUD shifts to **BLOCKED**.
+*   **K-Nearest Neighbor (k=1) Boundary Validation**: Replaces the explicit Master Baseline target. Evaluates Stress Test queries against dynamic topology elements.
+*   **Zone Beta (Stress Test Sandbox)**: Compares `STRESS_TEST_QUERY` vector against the nearest sovereign knowledge chunk using $D_n$.
+*   **Firewall Logic Threshold ($D_{fire}$)**: If distance to `STRESS` $\ge D_{fire}$, HUD shifts to **BLOCKED**. The visual slider for $D_{fire}$ features a debounced zero-latency sync mechanism, guaranteeing real-time UI/backend parity with the L2 Semantic Firewall Interceptor state.
 
 ### Deep Observability & Telemetry
 ### Deep Observability & Telemetry

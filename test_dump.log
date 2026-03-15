@@ -1,0 +1,114 @@
+\n--- Testing Firewall Fail-Secure on Empty Database ---
+✅ Firewall Fail-Secure on Empty Database OK (Blocked successfully)
+Testing /arithmetic...
+✅ Arithmetic OK
+\n--- Testing Arithmetic Vector Dimension (/arithmetic) ---
+✅ Arithmetic Vector Dimension OK
+Testing /embed...
+✅ Embed OK
+\n--- Testing Flight Manifold Boundaries (/galaxy) ---
+✅ Flight Manifold Check: All coordinates within [0, 300] safe flight zone.
+\n--- Testing Tokenize Raw Vector Retention (/tokenize) ---
+✅ Tokenize Raw Vector Retention OK
+\n--- Testing Vector Distance Integrity (/arithmetic) ---
+✅ Vector Distance Integrity OK - 1024D vector reliably provided.
+\n--- Testing Arithmetic Top K Results (/arithmetic) ---
+✅ Arithmetic Top K Results OK
+\n--- Testing Tokenize Raw Vector No NaN 1024D (/tokenize) ---
+✅ Tokenize Raw Vector No NaN 1024D OK
+\n--- Testing Analyze Dimension Probe (/analyze_dimension) ---
+✅ Analyze Dimension Probe OK
+\n--- Testing Dimension Probe Precision (/analyze_dimension) ---
+ℹ️ Probing boundaries [0] and [1023] for magnitude stability...
+✅ Dimension Probe Precision bounds OK
+\n--- Testing HUD Telemetry Scaling Simulation ---
+✅ Max Scale 40960.0 fits neatly inside 100,000 unit Frustum.
+\n--- Testing Vector Magnitudes Safe Math Guard ---
+✅ SafeMath Vector Magnitudes OK
+\n--- Testing XZ Layout 2D Bearing Safe Math Guard ---
+✅ SafeMath XZ Layout 2D Bearing OK
+\n--- Testing L2 Distance Integrity ---
+✅ L2 Distance Integrity OK. Endpoint is stable with new metric.
+\n--- Testing L2 Frontend-Backend Mathematical Parity ---
+✅ L2 Parity Verified: Frontend (1.9572) == Backend (1.9572)
+\n--- Testing Context Inject Pack Stress (/corpus/inject-pack) ---
+✅ Context Inject Pack OK
+\n--- Testing Firewall Trigger Logic (Math Validation) ---
+✅ Firewall Logic OK -> Safe: 3.20, Blocked: 48.00 (Threshold: 25.0)
+\n--- Testing Single Baseline L2 Audit Tokenization (/tokenize) ---
+✅ Single Baseline L2 Audit Tokenization OK. (Dn: 21.4788)
+\n--- Testing L2 Auto-Fit Bounding Box Math ---
+✅ Bounding Box Math OK. Projections generated: X=5656.85, Z=5656.85
+\n--- Testing Cenital Auto-Fit Camera Math ---
+✅ Cenital Auto-Fit Math OK. Deterministic Framing: Y=5775.00, Z=1925.00
+\n--- Testing Radar HUD Telemetry Bounds Math Check ---
+✅ Radar HUD Telemetry Bounds OK. Deterministic maxRadius calculated as finite number: 3002000.00
+\n--- Testing BGE-M3 Vector Parity (Chat Prompt Routing) ---
+Traceback (most recent call last):
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/backend/perform_tests.py", line 1131, in <module>
+    main()
+    ~~~~^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/backend/perform_tests.py", line 1121, in main
+    if not test():
+           ~~~~^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/backend/perform_tests.py", line 635, in test_bge_m3_vector_parity_chat_prompt
+    r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=OFF] Validate vector", "model": "llama3.1", "top_k": 3}, timeout=TIMEOUT)
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_api.py", line 304, in post
+    return request(
+        "POST",
+    ...<13 lines>...
+        trust_env=trust_env,
+    )
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_api.py", line 109, in request
+    return client.request(
+           ~~~~~~~~~~~~~~^
+        method=method,
+        ^^^^^^^^^^^^^^
+    ...<8 lines>...
+        follow_redirects=follow_redirects,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_client.py", line 928, in send
+    raise exc
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_client.py", line 922, in send
+    response.read()
+    ~~~~~~~~~~~~~^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_models.py", line 881, in read
+    self._content = b"".join(self.iter_bytes())
+                    ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_models.py", line 897, in iter_bytes
+    for raw_bytes in self.iter_raw():
+                     ~~~~~~~~~~~~~^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_models.py", line 951, in iter_raw
+    for raw_stream_bytes in self.stream:
+                            ^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_client.py", line 153, in __iter__
+    for chunk in self._stream:
+                 ^^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpx/_transports/default.py", line 127, in __iter__
+    for part in self._httpcore_stream:
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/connection_pool.py", line 407, in __iter__
+    raise exc from None
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/connection_pool.py", line 403, in __iter__
+    for part in self._stream:
+                ^^^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/http11.py", line 342, in __iter__
+    raise exc
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/http11.py", line 334, in __iter__
+    for chunk in self._connection._receive_response_body(**kwargs):
+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/http11.py", line 203, in _receive_response_body
+    event = self._receive_event(timeout=timeout)
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_sync/http11.py", line 217, in _receive_event
+    data = self._network_stream.read(
+        self.READ_NUM_BYTES, timeout=timeout
+    )
+  File "/Users/hbauzan/treepwood/semantic_guardtrails/sg_env/lib/python3.14/site-packages/httpcore/_backends/sync.py", line 128, in read
+    return self._sock.recv(max_bytes)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^
+KeyboardInterrupt

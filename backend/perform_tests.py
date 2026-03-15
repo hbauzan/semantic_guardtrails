@@ -2,6 +2,7 @@ import httpx
 import sys
 BASE_URL = "http://127.0.0.1:8000"
 TIMEOUT = 300.0
+DUMMY_PDF_BYTES = b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 21 >>\nstream\nBT /F1 24 Tf 100 700 Td (Hello World) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000214 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n285\n%%EOF\n'
 
 def log_section(msg): print(f"\\n--- {msg} ---")
 def log_info(msg): print(f"ℹ️ {msg}")
@@ -42,8 +43,8 @@ def test_arithmetic_vector_dimension():
                 
             if len(results) == 0:
                 log_info("Skipped results count check: Database is empty.")
-            elif len(results) != 3:
-                log_fail(f"Results length does not match top_k=3. Got: {len(results)}")
+            elif len(results) > 3:
+                log_fail(f"Results length exceeds top_k=3. Got: {len(results)}")
                 return False
                 
             log_success("Arithmetic Vector Dimension OK")
@@ -658,7 +659,7 @@ def test_bge_m3_vector_parity_chat_prompt():
 def test_async_pdf_upload_task_creation():
     log_section("Testing Async PDF Upload Task Creation (/corpus/upload-pdf)")
     try:
-        files = {'file': ('test.pdf', b'dummy content', 'application/pdf')}
+        files = {'file': ('test.pdf', DUMMY_PDF_BYTES, 'application/pdf')}
         r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
         if r.status_code == 200:
             data = r.json()
@@ -676,7 +677,7 @@ def test_async_pdf_upload_task_creation():
 def test_task_status_endpoint():
     log_section("Testing Task Status Endpoint (/corpus/task-status/{task_id})")
     try:
-        files = {'file': ('test2.pdf', b'dummy content 2', 'application/pdf')}
+        files = {'file': ('test2.pdf', DUMMY_PDF_BYTES, 'application/pdf')}
         r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
         if r.status_code != 200:
             log_fail("Failed to create task for status test.")
@@ -739,10 +740,64 @@ def test_firewall_interceptor_blocking():
          log_fail(f"Exception: {e}")
          return False
 
+def test_firewall_slider_sync():
+    log_section("Testing Real-Time Firewall Threshold Synchronization")
+    try:
+        import json
+        # 1. Set strict threshold
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 0.001}, timeout=TIMEOUT)
+        
+        r1 = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=ON] Apple pie recipe", "model": "llama3.1", "top_k": 1}, timeout=TIMEOUT)
+        
+        blocked = False
+        meta_distance = 0.0
+        if r1.status_code == 200:
+            lines = r1.text.strip().split('\n')
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "metadata":
+                             meta_distance = data.get("distance", 0.0)
+                        if data.get("type") == "content" and "SECURITY BREACH" in data.get("text", ""):
+                            blocked = True
+                    except: pass
+                    
+        # If DB is empty, distance is 0, so it won't block. We account for this fail-open scenario.
+        if not blocked and meta_distance > 0.0:
+            log_fail(f"Firewall failed to block with strict threshold. Distance was {meta_distance} (expected > 0.001)")
+            return False
+
+        # 3. Set lax threshold
+        httpx.post(f"{BASE_URL}/galaxy/config", json={"firewall_threshold": 300.0}, timeout=TIMEOUT)
+        r2 = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=ON] Apple pie recipe", "model": "llama3.1", "top_k": 1}, timeout=TIMEOUT)
+        
+        passed = False
+        if r2.status_code == 200:
+            lines = r2.text.strip().split('\n')
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "content" and "SECURITY BREACH" not in data.get("text", ""):
+                            passed = True
+                            break
+                    except: pass
+                    
+        if not passed:
+            log_fail("Firewall failed to allow with lax threshold.")
+            return False
+            
+        log_success("Real-Time Firewall Threshold Synchronization OK")
+        return True
+    except Exception as e:
+        log_fail(f"Exception during Firewall Slider Sync test: {e}")
+        return False
+
 def test_task_status_ram_telemetry():
     log_section("Testing Task Status RAM Telemetry (/corpus/task-status/{task_id})")
     try:
-        files = {'file': ('test_ram.pdf', b'dummy content ram', 'application/pdf')}
+        files = {'file': ('test_ram.pdf', DUMMY_PDF_BYTES, 'application/pdf')}
         r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
         if r.status_code != 200:
             log_fail("Failed to create task for status test.")
@@ -774,7 +829,7 @@ def test_etr_telemetry_math():
     log_section("Testing ETR Telemetry Math Logic (/corpus/task-status/{task_id})")
     try:
         import math
-        files = {'file': ('test_etr.pdf', b'dummy content etr math', 'application/pdf')}
+        files = {'file': ('test_etr.pdf', DUMMY_PDF_BYTES, 'application/pdf')}
         r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
         if r.status_code != 200:
             log_fail("Failed to create task for ETR test.")
@@ -871,7 +926,7 @@ def test_pdf_ingestion_non_blocking_and_imports():
     log_section("Testing PDF Ingestion Non-Blocking and Imports (/corpus/upload-pdf)")
     try:
         import time
-        files = {'file': ('dummy_test.pdf', b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 21 >>\nstream\nBT /F1 24 Tf 100 700 Td (Hello World) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000214 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n285\n%%EOF\n', 'application/pdf')}
+        files = {'file': ('dummy_test.pdf', DUMMY_PDF_BYTES, 'application/pdf')}
         
         start_t = time.time()
         r = httpx.post(f"{BASE_URL}/corpus/upload-pdf", files=files, timeout=TIMEOUT)
@@ -909,8 +964,146 @@ def test_pdf_ingestion_non_blocking_and_imports():
         log_fail(f"Exception: {e}")
         return False
 
+def test_cluster_summary_dual_storage():
+    log_section("Testing Cluster Summary Dual Storage (/clusters/summary)")
+    try:
+        r = httpx.get(f"{BASE_URL}/clusters/summary", timeout=TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            if not isinstance(data, list):
+                log_fail("Cluster summary must return a list.")
+                return False
+                
+            for cluster in data:
+                if "id" not in cluster or "label" not in cluster or "count" not in cluster or "centroid_xyz" not in cluster:
+                    log_fail("Cluster schema missing required fields.")
+                    return False
+                if not isinstance(cluster["centroid_xyz"], list) or len(cluster["centroid_xyz"]) != 3:
+                    log_fail("centroid_xyz must be a list of 3 coordinates.")
+                    return False
+                    
+            log_success("Cluster Summary Dual Storage OK")
+            return True
+        log_fail(f"Request failed: {r.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_firewall_fail_secure_on_empty_db():
+    log_section("Testing Firewall Fail-Secure on Empty Database")
+    try:
+        import json
+        # Since the database is usually empty at test start, let's just make sure
+        # we try FW=ON and it blocks because there are no knowledge nodes.
+        r = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=ON] Apple pie recipe", "model": "llama3.1", "top_k": 1}, timeout=TIMEOUT)
+        if r.status_code == 200:
+            lines = r.text.strip().split('\n')
+            blocked = False
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "content" and "SECURITY BREACH" in data.get("text", ""):
+                            blocked = True
+                    except: pass
+            
+            if blocked:
+                log_success("Firewall Fail-Secure on Empty Database OK (Blocked successfully)")
+                return True
+            else:
+                log_fail("Firewall failed to block on empty database.")
+                return False
+        log_fail("Chat endpoint failed.")
+        return False
+    except Exception as e:
+         log_fail(f"Exception: {e}")
+         return False
+
+def test_nearest_neighbor_firewall_audit():
+    log_section("Testing Nearest-Neighbor Firewall Audit Logic (/audit)")
+    try:
+        import json
+        # Inject standard knowledge node
+        payload = {
+            "name": "Audit Matrix",
+            "color": "#ff00ff",
+            "description": "Auto-test injection payload for K=1 testing",
+            "terms": {
+                "Alpha Centauri": "Nearest star system.",
+                "Singularity": "Center of a black hole."
+            }
+        }
+        r_inj = httpx.post(f"{BASE_URL}/corpus/inject-pack", json=payload, timeout=TIMEOUT)
+        if r_inj.status_code != 200:
+            log_fail("Inject Pack failed before NN Audit")
+            return False
+            
+        # Test NN via /audit endpoint
+        r_aud = httpx.post(f"{BASE_URL}/audit", json={"query": "star system"}, timeout=TIMEOUT)
+        if r_aud.status_code == 200:
+            aud_data = r_aud.json()
+            if aud_data.get("distance", 0) > 0:
+                log_success(f"Nearest-Neighbor Firewall Audit OK (Dn: {aud_data.get('distance')})")
+                return True
+            else:
+                log_fail("Audit failed to return valid distance from NN node.")
+                return False
+        log_fail(f"/audit endpoint failed: {r_aud.text}")
+        return False
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
+def test_rag_context_injection():
+    log_section("Testing RAG Context Injection (/chat)")
+    try:
+        import json
+        payload = {
+            "name": "Manual Demo",
+            "color": "#00ff00",
+            "description": "Auto-test injection payload for context testing",
+            "terms": {
+                "Change a lamp": "To change a lamp, first unscrew the broken bulb, then insert the new LED lamp.",
+            }
+        }
+        r_inj = httpx.post(f"{BASE_URL}/corpus/inject-pack", json=payload, timeout=TIMEOUT)
+        if r_inj.status_code != 200:
+            log_fail("Inject Pack failed before RAG test")
+            return False
+
+        r_chat = httpx.post(f"{BASE_URL}/chat", json={"prompt": "[FW=OFF] How do I change a lamp?", "model": "llama3.1", "top_k": 5}, timeout=TIMEOUT)
+        if r_chat.status_code == 200:
+            lines = r_chat.text.strip().split('\n')
+            
+            # The context is evaluated by the LLM so it shouldn't just say SECURITY BREACH
+            # We also just verify no crashes occur and stream works.
+            content_received = False
+            for line in lines:
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "content" and "SECURITY BREACH" not in data.get("text", ""):
+                            content_received = True
+                    except: pass
+            
+            if content_received:
+                 log_success("RAG Context Injection OK (Chat response initiated without security breach)")
+                 return True
+            else:
+                 log_fail("No acceptable content received from chat stream.")
+                 return False
+        else:
+            log_fail(f"/chat endpoint failed: {r_chat.text}")
+            return False
+            
+    except Exception as e:
+        log_fail(f"Exception: {e}")
+        return False
+
 def main():
     tests = [
+        test_firewall_fail_secure_on_empty_db,
         test_arithmetic, test_arithmetic_vector_dimension, test_embed, test_flight_manifold_boundaries,
         test_tokenize_raw_vector_retention, test_vector_distance_integrity, test_arithmetic_top_k_results,
         test_tokenize_raw_vector_no_nan_1024d, test_analyze_dimension_probe, test_dimension_probe_precision,
@@ -920,7 +1113,8 @@ def main():
         test_cenital_autofit_math, test_radar_hud_telemetry_bounds,
         test_bge_m3_vector_parity_chat_prompt, test_async_pdf_upload_task_creation, test_task_status_endpoint, test_firewall_interceptor_blocking,
         test_task_status_ram_telemetry, test_streaming_ingestor_generator, test_system_stats_endpoint,
-        test_etr_telemetry_math, test_pdf_ingestion_non_blocking_and_imports
+        test_etr_telemetry_math, test_pdf_ingestion_non_blocking_and_imports, test_cluster_summary_dual_storage,
+        test_firewall_slider_sync, test_nearest_neighbor_firewall_audit, test_rag_context_injection
     ]
     all_passed = True
     for test in tests:

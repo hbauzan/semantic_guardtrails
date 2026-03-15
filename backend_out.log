@@ -1,0 +1,21 @@
+/Users/hbauzan/treepwood/semantic_guardtrails/backend/app/main.py:33: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Will watch for changes in these directories: ['/Users/hbauzan/treepwood/semantic_guardtrails/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [24390] using StatReload
+📂 Geometry state loaded (Shadow Projector Active).
+INFO:     Started server process [24711]
+INFO:     Waiting for application startup.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+📂 Geometry state loaded (Shadow Projector Active).
+🚀 Starting LSV Engine...
+🔌 Loading Local Model: BAAI/bge-m3 on mps...
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 73942.60it/s]
+INFO:     Application startup complete.
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/loky-24711-nbumt757'}
+  warnings.warn(

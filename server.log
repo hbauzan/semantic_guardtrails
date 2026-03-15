@@ -1,0 +1,13 @@
+INFO:     Started server process [37782]
+INFO:     Waiting for application startup.
+📂 Geometry state loaded (Shadow Projector Active).
+🚀 Starting LSV Engine...
+🔌 Loading Local Model: BAAI/bge-m3 on mps...
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 44830.05it/s]
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+INFO:     Application startup complete.
+ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): [errno 48] address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+📂 Connected to Vault: vectors_BAAI_bge_m3_1024
+✅ System Ready.

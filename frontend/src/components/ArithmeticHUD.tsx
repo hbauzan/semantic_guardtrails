@@ -460,7 +460,6 @@ const ArithmeticHUD: React.FC = () => {
     };
   }, []);
 
-  const [wordA, setWordA] = useState('rey');
   const [showInjector, setShowInjector] = useState(false);
   const [injectorText, setInjectorText] = useState('');
   const [injectorStatus, setInjectorStatus] = useState('');
@@ -478,6 +477,21 @@ const ArithmeticHUD: React.FC = () => {
   const setStressTestQuery = useSemanticStore((state) => state.setStressTestQuery);
   const firewallThreshold = useSemanticStore((state) => state.firewallThreshold);
   const setFirewallThreshold = useSemanticStore((state) => state.setFirewallThreshold);
+
+  // Synchronize firewallThreshold -> Backend (Debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetch('http://127.0.0.1:8000/galaxy/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ firewall_threshold: firewallThreshold })
+      }).catch(err => console.error('Error syncing firewall threshold:', err));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [firewallThreshold]);
+
   const setIsTyping = useSemanticStore((state) => state.setIsTyping);
   const uploadStatus = useSemanticStore((state) => state.uploadStatus);
   const setUploadStatus = useSemanticStore((state) => state.setUploadStatus);
@@ -494,7 +508,6 @@ const ArithmeticHUD: React.FC = () => {
   const setIngestStartTime = useSemanticStore((state) => state.setIngestStartTime);
 
   const colors = useSemanticStore((state) => state.colors);
-  const setBaselineColor = useSemanticStore((state) => state.setBaselineColor);
 
   const topResults = useSemanticStore((state) => state.results);
   const setResults = useSemanticStore((state) => state.setResults);
@@ -508,6 +521,38 @@ const ArithmeticHUD: React.FC = () => {
   const [cameraMaxRadius, setCameraMaxRadius] = useState<number | null>(null);
 
   const [isStressInputFocused, setIsStressInputFocused] = useState(false);
+  const [activePacks, setActivePacks] = useState<any[]>([]);
+
+  const fetchPacks = async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/clusters/summary');
+      if (res.ok) {
+        const data = await res.json();
+        setActivePacks(data.filter((p: any) => p.label !== 'GALAXY_BASE'));
+      }
+    } catch (err) {
+      console.error('Error fetching active packs:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchPacks();
+  }, []);
+
+  const handleDeletePack = async (label: string) => {
+    try {
+      setInjectorStatus(`Deleting ${label}...`);
+      const res = await fetch(`http://127.0.0.1:8000/corpus/remove-pack/${encodeURIComponent(label)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setInjectorStatus(`Deleted ${label}`);
+        fetchPacks();
+      } else {
+        setInjectorStatus(`Failed to delete ${label}`);
+      }
+    } catch (err) {
+      setInjectorStatus('Error deleting pack');
+    }
+  };
 
   const handleInject = async () => {
     if (!injectorText.trim()) return;
@@ -534,6 +579,7 @@ const ArithmeticHUD: React.FC = () => {
       });
       if (!res.ok) throw new Error('Failed to inject context');
       setInjectorStatus('Injection Successful');
+      fetchPacks();
       setTimeout(() => {
         setShowInjector(false);
         setInjectorStatus('');
@@ -594,6 +640,7 @@ const ArithmeticHUD: React.FC = () => {
 
               setTimeout(() => {
                 calculate();
+                fetchPacks();
                 setShowInjector(false);
                 setInjectorStatus('');
                 setUploadStatus(0);
@@ -628,88 +675,66 @@ const ArithmeticHUD: React.FC = () => {
     }
   };
 
-  const extractCoords = (data: any): [number, number, number] => {
-    if (data.xyz && data.xyz.length >= 3) return [data.xyz[0], data.xyz[1], data.xyz[2]];
-    if (data.point && data.point.length >= 3) return [data.point[0], data.point[1], data.point[2]];
-    if (data.vector && data.vector.length >= 3) return [data.vector[0], data.vector[1], data.vector[2]];
-    if (data.embedding && data.embedding.length >= 3) return [data.embedding[0], data.embedding[1], data.embedding[2]];
-    if (Array.isArray(data) && data.length >= 3) return [data[0], data[1], data[2]];
-    return [Math.random() * 5, Math.random() * 5, Math.random() * 5]; // Fallback
-  };
+
 
   const calculate = async () => {
     setLoading(true);
     setError(null);
     setResults([]); // Clear previous results
     try {
-      const newNodes: NodeData[] = [];
-
-      // 1. Audit Master Baseline
-      const baselineTokenizeRes = await fetch('http://127.0.0.1:8000/tokenize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: wordA, include_raw_vector: true })
-      });
-      if (!baselineTokenizeRes.ok) throw new Error(`Error en /tokenize para ${wordA}`);
-      const baselineTokenizeData = await baselineTokenizeRes.json();
-
-      let baselineVector: number[] = [];
-      if (baselineTokenizeData.tokens && baselineTokenizeData.tokens.length > 0) {
-        const mainToken = baselineTokenizeData.tokens[0];
-        if (mainToken.vector) {
-          baselineVector = mainToken.vector;
-        }
+      if (stressTestQuery.trim() === '') {
+        throw new Error('Please enter a Stress Test Query.');
       }
 
+      const newNodes: NodeData[] = [];
+
+      // Audit Stress Test Query
+      const auditRes = await fetch('http://127.0.0.1:8000/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: stressTestQuery })
+      });
+      if (!auditRes.ok) throw new Error(`Error en /audit`);
+      const auditData = await auditRes.json();
+
+      const queryVector = auditData.query_vector || [];
+      const nnVector = auditData.nearest_neighbor_vector || [];
+      const nnText = auditData.nearest_neighbor_text || "NO_KNOWLEDGE_NODE_FOUND";
+
+      // Nearest Neighbor Node (acts as Baseline)
       newNodes.push({
-        word: wordA,
+        word: nnText,
         position: [0, 0, 0], // Explicitly lock anchor to [0,0,0]
         color: colors.baselineColor,
-        vector: baselineVector,
+        vector: nnVector,
         token_id: Math.random()
       });
 
-      // 2. Extract Stress Test Query (if provided)
-      if (stressTestQuery.trim() !== '') {
-        const stressRes = await fetch('http://127.0.0.1:8000/tokenize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: stressTestQuery, include_raw_vector: true })
-        });
-        if (stressRes.ok) {
-          const stressData = await stressRes.json();
-          if (stressData.tokens && stressData.tokens.length > 0) {
-            const stressToken = stressData.tokens[0];
-            const pos = extractCoords(stressToken); // Radial mapping is determined during render based on Dn
-            const vec = stressToken.vector || [];
-            newNodes.push({
-              word: stressTestQuery,
-              position: pos,
-              color: '#ff3300', // Warning Orange/Red default
-              vector: vec,
-              token_id: Math.random()
-            });
-          }
-        }
-      }
-
-      setNodes(newNodes);
+      // Stress Test Query Node
+      const pos = [0, 0, 0] as [number, number, number]; // Radial mapping is determined during render based on Dn
+      newNodes.push({
+        word: stressTestQuery,
+        position: pos,
+        color: '#ff3300', // Warning Orange/Red default
+        vector: queryVector,
+        token_id: Math.random()
+      });
 
       // --- AUTO-FIT CAMERA LOGIC ---
       let maxDn = 0;
 
-      if (newNodes.length > 1 && newNodes[1].vector && baselineVector.length > 0) {
-        const vA = baselineVector;
+      if (queryVector.length > 0 && nnVector.length > 0) {
+        const vA = nnVector;
         const magA = getVectorMagnitude(vA);
-        const magN = getVectorMagnitude(newNodes[1].vector!);
+        const magN = getVectorMagnitude(queryVector);
         if (magA > 0 && magN > 0) {
-          const diffSquaredSum = vA.reduce((sum, val, idx) => {
-            const diff = val - (newNodes[1].vector![idx] || 0);
+          const diffSquaredSum = vA.reduce((sum: number, val: number, idx: number) => {
+            const diff = val - (queryVector[idx] || 0);
             return sum + (diff * diff);
           }, 0);
           maxDn = Math.sqrt(diffSquaredSum);
 
-          const angle = Math.atan2(newNodes[1].vector![2], newNodes[1].vector![0]);
+          const angle = Math.atan2(queryVector[2], queryVector[0]);
           const normX = Math.cos(angle);
           const normZ = Math.sin(angle);
           const BASE_SPREAD = 50.0;
@@ -794,7 +819,7 @@ const ArithmeticHUD: React.FC = () => {
   // Firewall Status Check
   const firewallStatus = React.useMemo(() => {
     if (nodes.length < 2 || !nodes[0].vector || !nodes[1].vector) return null;
-    const vRes = nodes[0].vector; // Master Baseline Result (index 0)
+    const vRes = nodes[0].vector; // Nearest Neighbor Result (index 0)
     const vTest = nodes[1].vector; // Stress Test Query (index 1)
 
     const diffSquaredSum = vRes.reduce((sum, val, idx) => {
@@ -999,6 +1024,47 @@ const ArithmeticHUD: React.FC = () => {
               </div>
             )}
           </div>
+
+          <div style={{ padding: '10px', border: '1px dashed #005555', borderRadius: '4px', background: 'rgba(0,0,0,0.5)', overflowY: 'auto', maxHeight: '150px' }}>
+            <span style={{ color: '#00ffff', fontSize: '0.8rem', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Loaded Documents</span>
+            {activePacks.length === 0 ? (
+              <div style={{ color: '#666', fontSize: '0.75rem', fontStyle: 'italic', textAlign: 'center' }}>No custom packs loaded.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                {activePacks.map((pack, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#001111', padding: '5px 8px', borderRadius: '3px', border: '1px solid #003333' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ color: '#00ff00', fontSize: '0.8rem' }}>{pack.label}</span>
+                      <span style={{ color: '#888', fontSize: '0.65rem' }}>{pack.count} vectors</span>
+                    </div>
+                    <button
+                      onClick={() => handleDeletePack(pack.label)}
+                      title="Delete Pack"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ff3333',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '4px',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 51, 51, 0.2)'}
+                      onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: injectorStatus.includes('Error') || injectorStatus.includes('CRITICAL') ? '#ff3333' : '#00ff00', fontSize: '0.8rem' }}>{injectorStatus}</span>
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -1044,23 +1110,7 @@ const ArithmeticHUD: React.FC = () => {
           THE AUDITOR'S CONSOLE
         </h2>
 
-        {/* --- ZONE ALPHA: MASTER BASELINE --- */}
-        <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
-          <div style={{ color: '#00ccff', fontSize: '0.9rem', marginBottom: '10px', fontWeight: 'bold' }}>ZONE ALPHA: MASTER BASELINE</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <label style={{ fontSize: '0.8rem', color: colors.baselineColor }}>Baseline Input</label>
-            <div style={{ display: 'flex', gap: '5px' }}>
-              <input
-                value={wordA}
-                onFocus={() => setIsTyping(true)}
-                onBlur={() => setIsTyping(false)}
-                onChange={(e) => setWordA(e.target.value)}
-                style={{ flex: 1, padding: '8px', background: '#000', border: `1px solid ${colors.baselineColor}`, color: '#fff', borderRadius: '4px' }}
-              />
-              <input type="color" value={colors.baselineColor} onChange={(e) => setBaselineColor(e.target.value)} style={{ width: '40px', padding: '0', border: 'none', background: 'none' }} />
-            </div>
-          </div>
-        </div>
+
 
         {/* --- ZONE BETA: STRESS TEST SANDBOX --- */}
         <div style={{ borderBottom: '1px solid #005555', paddingBottom: '10px' }}>
